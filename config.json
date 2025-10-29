@@ -1,0 +1,27 @@
+{
+  "app": {
+    "name": "DouyinGo",
+    "version": "1.0.0",
+    "author": "DouyinGo Team"
+  },
+  "download": {
+    "default_dir": "douyin_downloads",
+    "quality": "原画",
+    "format": "MP4",
+    "download_type": "视频",
+    "save_metadata": true,
+    "download_cover": true,
+    "download_music": false
+  },
+  "ui": {
+    "window_width": 1200,
+    "window_height": 700,
+    "theme": "light"
+  },
+  "douyin": {
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "timeout": 30,
+    "max_retries": 3,
+    "retry_delay": 1
+  }
+}

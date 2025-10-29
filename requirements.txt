@@ -1,0 +1,14 @@
+# Douyin App - 抖音视频下载器依赖包
+# Python 3.7+ required
+
+# GUI Framework - PyQt5
+PyQt5>=5.15.0,<6.0.0
+
+# HTTP Requests
+requests>=2.31.0,<3.0.0
+
+# Note: ffmpeg is required for video thumbnail extraction
+# Install ffmpeg separately:
+# - Windows: Download from https://ffmpeg.org/download.html
+# - Linux: sudo apt-get install ffmpeg
+# - macOS: brew install ffmpeg
