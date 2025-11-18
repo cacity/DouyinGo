@@ -7,6 +7,8 @@
 
 import os
 import sys
+import requests
+from threading import Thread
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -171,6 +173,11 @@ class VideoCard(QFrame):
         # 添加操作按钮布局，固定宽度，顶部对齐
         layout.addLayout(actions_layout, 0)  # 拉伸因子为0，固定宽度
 
+        # 初始化缩略图（支持本地路径和远程 URL）
+        thumbnail = self.video_data.get("thumbnail")
+        if thumbnail:
+            self.update_thumbnail(thumbnail)
+
     def update_status(self, status: str):
         """
         更新状态
@@ -201,15 +208,42 @@ class VideoCard(QFrame):
         self.progress_bar.setValue(progress)
 
     def update_thumbnail(self, thumbnail_path: str):
-        """更新缩略图"""
-        if thumbnail_path and os.path.exists(thumbnail_path):
+        """更新缩略图 - 支持本地路径和远程 URL"""
+        if not thumbnail_path:
+            return
+
+        # 判断是否是 URL（以 http:// 或 https:// 开头）
+        if thumbnail_path.startswith('http://') or thumbnail_path.startswith('https://'):
+            # 异步下载远程缩略图
+            def download_and_display():
+                try:
+                    response = requests.get(thumbnail_path, timeout=10)
+                    if response.status_code == 200:
+                        pixmap = QPixmap()
+                        pixmap.loadFromData(response.content)
+                        if not pixmap.isNull():
+                            self.thumbnail_label.setPixmap(pixmap)
+                            print(f"✅ 缩略图已从 URL 加载: {thumbnail_path[:50]}...")
+                        else:
+                            print(f"⚠️ 缩略图数据无效")
+                    else:
+                        print(f"⚠️ 下载缩略图失败，状态码: {response.status_code}")
+                except Exception as e:
+                    print(f"⚠️ 下载缩略图异常: {e}")
+
+            # 在后台线程中下载，避免阻塞 UI
+            thread = Thread(target=download_and_display, daemon=True)
+            thread.start()
+
+        # 本地文件路径
+        elif os.path.exists(thumbnail_path):
             try:
                 pixmap = QPixmap(thumbnail_path)
                 if not pixmap.isNull():
                     self.thumbnail_label.setPixmap(pixmap)
                     print(f"✅ 缩略图已更新: {thumbnail_path}")
             except Exception as e:
-                print(f"⚠️ 加载缩略图失败: {e}")
+                print(f"⚠️ 加载本地缩略图失败: {e}")
 
     def update_file_size(self, size_bytes: int):
         """更新文件大小"""

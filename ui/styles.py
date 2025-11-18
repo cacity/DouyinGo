@@ -15,6 +15,7 @@ TEXT_COLOR = "#333333"
 TEXT_SECONDARY = "#6C757D"
 BORDER_COLOR = "#E0E0E0"
 HOVER_COLOR = "#F0F4FF"
+HOVER_BG_COLOR = "#F0F4FF"
 SUCCESS_COLOR = "#28A745"
 ERROR_COLOR = "#DC3545"
 
@@ -154,7 +155,7 @@ QFrame#videoCard {{
 
 QFrame#videoCard:hover {{
     border-color: {PRIMARY_COLOR};
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    background-color: {HOVER_BG_COLOR};
 }}
 
 QLabel#videoTitle {{

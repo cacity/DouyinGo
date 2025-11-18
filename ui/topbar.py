@@ -40,6 +40,11 @@ class TopBar(QWidget):
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(15)
 
+        # 平台显示标签
+        self.platform_label = QLabel("🎵 抖音")
+        self.platform_label.setObjectName("platformLabel")
+        layout.addWidget(self.platform_label)
+
         # 粘贴链接按钮
         self.paste_btn = QPushButton("🔗 粘贴链接")
         self.paste_btn.setObjectName("pasteButton")
@@ -85,7 +90,7 @@ class TopBar(QWidget):
 
         # 状态标签
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #6C757D; font-size: 13px;")
+        self.status_label.setStyleSheet("color: #6C757D; font-size: 13px; min-width: 200px;")
         layout.addWidget(self.status_label)
 
     def on_paste_clicked(self):
@@ -108,7 +113,38 @@ class TopBar(QWidget):
         """设置状态文本"""
         self.status_label.setText(text)
 
+    def set_platform(self, platform: str):
+        """设置当前平台"""
+        platform_map = {
+            "douyin": "🎵 抖音",
+            "youtube": "📺 YouTube",
+            "twitter": "🐦 Twitter/X"
+        }
+        platform_text = platform_map.get(platform, "🎵 抖音")
+        self.platform_label.setText(platform_text)
+
     def get_clipboard_text(self) -> str:
         """获取剪贴板文本"""
         clipboard = QApplication.clipboard()
         return clipboard.text().strip()
+
+    def update_quality_options(self, platform: str):
+        """根据平台更新质量选项"""
+        self.quality_combo.clear()
+
+        if platform == "youtube":
+            self.quality_combo.addItems([
+                "最佳质量", "4K", "1440p", "1080p", "720p", "480p", "360p"
+            ])
+        elif platform == "twitter":
+            self.quality_combo.addItems([
+                "最佳质量", "1080p", "720p", "480p", "360p"
+            ])
+        else:  # douyin
+            self.quality_combo.addItems([
+                "原画", "超清(1080p)", "高清(720p)", "标清(480p)"
+            ])
+
+        # 设置默认选项
+        self.quality_combo.setCurrentIndex(0)
+

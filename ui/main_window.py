@@ -14,13 +14,15 @@ import platform
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon
 from ui.sidebar import Sidebar
 from ui.topbar import TopBar
 from ui.video_list import VideoList
 from ui.styles import MAIN_WINDOW_STYLE
 from core.downloader import DownloadManager
+from core.youtube_downloader import YouTubeDownloader
+from core.twitter_downloader import TwitterDownloader
 from core.thumbnail_extractor import get_video_duration, format_duration
 
 
@@ -29,13 +31,17 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.current_platform = "douyin"
         self.download_manager = DownloadManager()
+        self.youtube_downloader = YouTubeDownloader()
+        self.twitter_downloader = TwitterDownloader()
+        self.download_workers = {}  # 保存活跃的下载工作线程
         self.init_ui()
         self.connect_signals()
 
     def init_ui(self):
         """初始化UI"""
-        self.setWindowTitle("DouyinGo - 抖音视频下载工具")
+        self.setWindowTitle("VideoGo - 多平台视频下载工具")
         self.setMinimumSize(QSize(1200, 700))
         self.setStyleSheet(MAIN_WINDOW_STYLE)
 
@@ -81,6 +87,7 @@ class MainWindow(QMainWindow):
 
         # 侧边栏信号
         self.sidebar.page_changed.connect(self.on_page_changed)
+        self.sidebar.platform_changed.connect(self.on_platform_changed)
 
         # 视频列表信号
         self.video_list.download_clicked.connect(self.on_download_clicked)
@@ -94,6 +101,21 @@ class MainWindow(QMainWindow):
         self.download_manager.status_changed.connect(self.on_status_changed)
         self.download_manager.download_completed.connect(self.on_download_completed)
         self.download_manager.error_occurred.connect(self.on_error_occurred)
+
+    def extract_url_by_platform(self, text: str, platform: str) -> str:
+        """
+        根据平台从文本中提取对应的URL
+        """
+        import re
+
+        if platform == "douyin":
+            return self.extract_douyin_url(text)
+        elif platform == "youtube":
+            return self.extract_youtube_url(text)
+        elif platform == "twitter":
+            return self.extract_twitter_url(text)
+        else:
+            return text
 
     def extract_douyin_url(self, text: str) -> str:
         """
@@ -123,32 +145,119 @@ class MainWindow(QMainWindow):
 
         return text
 
+    def extract_youtube_url(self, text: str) -> str:
+        """
+        从文本中提取YouTube链接
+        """
+        import re
+
+        # 匹配YouTube链接的正则表达式
+        patterns = [
+            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+',
+            r'https?://youtu\.be/[\w-]+',
+            r'https?://(?:www\.)?youtube\.com/embed/[\w-]+',
+            r'https?://(?:www\.)?youtube\.com/v/[\w-]+',
+            r'https?://(?:www\.)?youtube\.com/shorts/[\w-]+',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(0)
+
+        # 如果文本本身是YouTube链接
+        text = text.strip()
+        if text.startswith('http') and ('youtube.com' in text or 'youtu.be' in text):
+            return text.split()[0]
+
+        return text
+
+    def extract_twitter_url(self, text: str) -> str:
+        """
+        从文本中提取Twitter/X链接
+        """
+        import re
+
+        # 匹配Twitter/X链接的正则表达式
+        patterns = [
+            r'https?://(?:www\.)?twitter\.com/\w+/status/\d+',
+            r'https?://(?:www\.)?x\.com/\w+/status/\d+',
+            r'https?://(?:www\.)?twitter\.com/i/web/status/\d+',
+            r'https?://(?:www\.)?x\.com/i/web/status/\d+',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(0)
+
+        # 如果文本本身是Twitter/X链接
+        text = text.strip()
+        if text.startswith('http') and ('twitter.com' in text or 'x.com' in text):
+            return text.split()[0]
+
+        return text
+
     def on_paste_clicked(self):
         """粘贴按钮点击"""
         # 获取剪贴板内容
         clipboard_text = self.topbar.get_clipboard_text()
 
         if not clipboard_text:
-            QMessageBox.warning(self, "提示", "剪贴板为空，请先复制抖音视频链接")
+            QMessageBox.warning(self, "提示", "剪贴板为空，请先复制视频链接")
             return
 
-        # 从文本中提取 URL
-        url = self.extract_douyin_url(clipboard_text)
+        # 根据当前平台提取对应的URL
+        url = self.extract_url_by_platform(clipboard_text, self.current_platform)
 
-        # 验证是否为抖音链接
-        if not self.is_douyin_url(url):
+        # 验证链接
+        if not self.validate_platform_url(url, self.current_platform):
+            platform_names = {
+                "douyin": "抖音",
+                "youtube": "YouTube",
+                "twitter": "Twitter/X"
+            }
+            platform_name = platform_names.get(self.current_platform, "当前平台")
+
+            supported_formats = self.get_supported_formats(self.current_platform)
             QMessageBox.warning(self, "提示",
-                              f"未找到有效的抖音链接\n\n支持的格式：\n- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx\n\n剪贴板内容：\n{clipboard_text[:100]}...")
+                              f"未找到有效的{platform_name}链接\n\n支持的格式：\n{supported_formats}\n\n剪贴板内容：\n{clipboard_text[:100]}...")
             return
 
         # 添加下载任务
         try:
             self.topbar.set_status("正在解析链接...")
-            self.download_manager.add_download(url)
+
+            if self.current_platform == "douyin":
+                self.download_manager.add_download(url)
+            elif self.current_platform == "youtube":
+                self.add_youtube_download(url)
+            elif self.current_platform == "twitter":
+                self.add_twitter_download(url)
+
             self.topbar.set_status(f"已添加下载任务 (共 {self.video_list.get_video_count()} 个)")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"添加下载任务失败：{str(e)}")
             self.topbar.set_status("")
+
+    def validate_platform_url(self, url: str, platform: str) -> bool:
+        """验证URL是否属于指定平台"""
+        if platform == "douyin":
+            return "douyin.com" in url or "dy.tt" in url
+        elif platform == "youtube":
+            return "youtube.com" in url or "youtu.be" in url
+        elif platform == "twitter":
+            return "twitter.com" in url or "x.com" in url
+        return False
+
+    def get_supported_formats(self, platform: str) -> str:
+        """获取平台支持的链接格式"""
+        formats = {
+            "douyin": "- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx",
+            "youtube": "- https://www.youtube.com/watch?v=xxxxx\n- https://youtu.be/xxxxx\n- https://www.youtube.com/shorts/xxxxx",
+            "twitter": "- https://twitter.com/user/status/xxxxx\n- https://x.com/user/status/xxxxx"
+        }
+        return formats.get(platform, "未知格式")
 
     def is_douyin_url(self, url: str) -> bool:
         """验证是否为抖音链接"""
@@ -169,6 +278,15 @@ class MainWindow(QMainWindow):
         print(f"格式改变: {format_type}")
         # TODO: 实现格式切换逻辑
 
+    def on_platform_changed(self, platform: str):
+        """平台切换"""
+        print(f"平台切换: {platform}")
+        self.current_platform = platform
+
+        # 更新顶部工具栏显示
+        self.topbar.set_platform(platform)
+        self.topbar.update_quality_options(platform)
+
     def on_page_changed(self, page_id: str):
         """页面切换"""
         print(f"页面切换: {page_id}")
@@ -188,6 +306,264 @@ class MainWindow(QMainWindow):
         """刷新按钮点击"""
         print(f"刷新视频: {video_id}")
         # TODO: 实现刷新逻辑
+
+    def add_youtube_download(self, url: str):
+        """添加YouTube下载任务"""
+        import hashlib
+
+        # 生成视频ID
+        video_id = hashlib.md5(f"youtube_{url}".encode()).hexdigest()[:16]
+
+        try:
+            # 获取视频信息
+            video_info = self.youtube_downloader.get_video_info(url)
+
+            if video_info:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": video_info.get("title", "YouTube视频")[:50],
+                    "format": "MP4",
+                    "size": video_info.get("file_size", "未知"),
+                    "resolution": video_info.get("resolution", "未知"),
+                    "duration": video_info.get("duration_string", "未知"),
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": video_info.get("thumbnail"),
+                    "platform": "youtube"
+                }
+            else:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": "YouTube视频",
+                    "format": "MP4",
+                    "size": "未知",
+                    "resolution": "未知",
+                    "duration": "未知",
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": None,
+                    "platform": "youtube"
+                }
+
+            # 添加到视频列表
+            self.video_list.add_video(video_data)
+
+            # 开始下载
+            self.start_youtube_download(video_id, url)
+
+        except Exception as e:
+            raise Exception(f"YouTube下载失败: {str(e)}")
+
+    def add_twitter_download(self, url: str):
+        """添加Twitter下载任务"""
+        import hashlib
+
+        # 生成视频ID
+        video_id = hashlib.md5(f"twitter_{url}".encode()).hexdigest()[:16]
+
+        try:
+            # 获取视频信息
+            video_info = self.twitter_downloader.get_video_info(url)
+
+            if video_info:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": video_info.get("title", "Twitter视频")[:50],
+                    "format": "MP4",
+                    "size": video_info.get("file_size", "未知"),
+                    "resolution": video_info.get("resolution", "未知"),
+                    "duration": video_info.get("duration_string", "未知"),
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": video_info.get("thumbnail"),
+                    "platform": "twitter"
+                }
+            else:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": "Twitter视频",
+                    "format": "MP4",
+                    "size": "未知",
+                    "resolution": "未知",
+                    "duration": "未知",
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": None,
+                    "platform": "twitter"
+                }
+
+            # 添加到视频列表
+            self.video_list.add_video(video_data)
+
+            # 开始下载
+            self.start_twitter_download(video_id, url)
+
+        except Exception as e:
+            raise Exception(f"Twitter下载失败: {str(e)}")
+
+    def _cleanup_worker(self, video_id: str):
+        """清理完成的工作线程"""
+        if video_id in self.download_workers:
+            worker = self.download_workers[video_id]
+            worker.deleteLater()
+            del self.download_workers[video_id]
+
+    def start_youtube_download(self, video_id: str, url: str):
+        """开始YouTube下载"""
+        class YouTubeDownloadWorker(QThread):
+            progress_updated = pyqtSignal(str, int, str)
+            status_changed = pyqtSignal(str, str)
+            download_completed = pyqtSignal(str, dict)
+            error_occurred = pyqtSignal(str, str)
+
+            def __init__(self, video_id, url, downloader):
+                super().__init__()
+                self.video_id = video_id
+                self.url = url
+                self.downloader = downloader
+
+            def run(self):
+                try:
+                    self.status_changed.emit(self.video_id, "downloading")
+                    self.progress_updated.emit(self.video_id, 10, "正在解析视频...")
+
+                    def progress_callback(progress, message):
+                        self.progress_updated.emit(self.video_id, progress, message)
+
+                    result = self.downloader.download_video(self.url, progress_callback=progress_callback)
+
+                    if result.get("success"):
+                        self.progress_updated.emit(self.video_id, 100, "下载完成")
+                        self.status_changed.emit(self.video_id, "success")
+                        self.download_completed.emit(self.video_id, result)
+                    else:
+                        error = result.get("error", "未知错误")
+                        self.status_changed.emit(self.video_id, "error")
+                        self.error_occurred.emit(self.video_id, error)
+
+                except Exception as e:
+                    self.status_changed.emit(self.video_id, "error")
+                    self.error_occurred.emit(self.video_id, str(e))
+
+        # 创建并启动工作线程
+        worker = YouTubeDownloadWorker(video_id, url, self.youtube_downloader)
+        worker.progress_updated.connect(self.on_progress_updated)
+        worker.status_changed.connect(self.on_status_changed)
+        worker.download_completed.connect(self.on_youtube_download_completed)
+        worker.error_occurred.connect(self.on_error_occurred)
+        worker.finished.connect(lambda: self._cleanup_worker(video_id))
+
+        # 保存工作线程引用
+        self.download_workers[video_id] = worker
+        worker.start()
+
+    def start_twitter_download(self, video_id: str, url: str):
+        """开始Twitter下载"""
+        class TwitterDownloadWorker(QThread):
+            progress_updated = pyqtSignal(str, int, str)
+            status_changed = pyqtSignal(str, str)
+            download_completed = pyqtSignal(str, dict)
+            error_occurred = pyqtSignal(str, str)
+
+            def __init__(self, video_id, url, downloader):
+                super().__init__()
+                self.video_id = video_id
+                self.url = url
+                self.downloader = downloader
+
+            def run(self):
+                try:
+                    self.status_changed.emit(self.video_id, "downloading")
+                    self.progress_updated.emit(self.video_id, 10, "正在解析视频...")
+
+                    def progress_callback(progress, message):
+                        self.progress_updated.emit(self.video_id, progress, message)
+
+                    result = self.downloader.download_video(self.url, progress_callback=progress_callback)
+
+                    if result.get("success"):
+                        self.progress_updated.emit(self.video_id, 100, "下载完成")
+                        self.status_changed.emit(self.video_id, "success")
+                        self.download_completed.emit(self.video_id, result)
+                    else:
+                        error = result.get("error", "未知错误")
+                        self.status_changed.emit(self.video_id, "error")
+                        self.error_occurred.emit(self.video_id, error)
+
+                except Exception as e:
+                    self.status_changed.emit(self.video_id, "error")
+                    self.error_occurred.emit(self.video_id, str(e))
+
+        # 创建并启动工作线程
+        worker = TwitterDownloadWorker(video_id, url, self.twitter_downloader)
+        worker.progress_updated.connect(self.on_progress_updated)
+        worker.status_changed.connect(self.on_status_changed)
+        worker.download_completed.connect(self.on_twitter_download_completed)
+        worker.error_occurred.connect(self.on_error_occurred)
+        worker.finished.connect(lambda: self._cleanup_worker(video_id))
+
+        # 保存工作线程引用
+        self.download_workers[video_id] = worker
+        worker.start()
+
+    def on_youtube_download_completed(self, video_id: str, result: dict):
+        """YouTube下载完成处理"""
+        # 显示状态
+        self.topbar.set_status(f"✅ YouTube下载完成")
+
+        # 记录日志
+        total_videos = len(self.video_list.video_cards)
+        print(f"📊 YouTube下载完成 - 视频ID: {video_id}, 总视频数: {total_videos}")
+
+        self.handle_download_completed(video_id, result, "YouTube")
+
+    def on_twitter_download_completed(self, video_id: str, result: dict):
+        """Twitter下载完成处理"""
+        # 显示状态
+        self.topbar.set_status(f"✅ Twitter/X下载完成")
+
+        # 记录日志
+        total_videos = len(self.video_list.video_cards)
+        print(f"📊 Twitter/X下载完成 - 视频ID: {video_id}, 总视频数: {total_videos}")
+
+        self.handle_download_completed(video_id, result, "Twitter/X")
+
+    def handle_download_completed(self, video_id: str, result: dict, platform: str):
+        """通用下载完成处理"""
+        # 不在这里更新状态栏，避免与on_download_completed重复
+
+        # 更新缩略图、文件大小和时长
+        downloaded_files = result.get("downloaded_files", [])
+        for file_info in downloaded_files:
+            if file_info.get("type") == "video":
+                # 更新缩略图
+                thumbnail_path = file_info.get("thumbnail")
+                if thumbnail_path:
+                    self.video_list.update_video_thumbnail(video_id, thumbnail_path)
+                    print(f"📸 已更新{platform}视频 {video_id} 的缩略图")
+
+                # 更新文件大小
+                video_path = file_info.get("path")
+                if video_path and os.path.exists(video_path):
+                    file_size = os.path.getsize(video_path)
+                    self.video_list.update_video_file_size(video_id, file_size)
+                    print(f"💾 已更新{platform}视频 {video_id} 的文件大小")
+
+                    # 更新视频时长
+                    duration_seconds = get_video_duration(video_path)
+                    if duration_seconds > 0:
+                        duration_str = format_duration(duration_seconds)
+                        self.video_list.update_video_duration(video_id, duration_str)
+                        print(f"⏱️ 已更新{platform}视频 {video_id} 的时长: {duration_str}")
+
+        # 显示通知
+        file_count = len(downloaded_files)
+        QMessageBox.information(self, "下载完成",
+                              f"{platform}视频下载完成！\n共下载 {file_count} 个文件")
 
     def on_delete_clicked(self, video_id: str):
         """删除按钮点击"""
@@ -231,11 +607,16 @@ class MainWindow(QMainWindow):
         self.video_list.update_video_status(video_id, status)
 
     def on_download_completed(self, video_id: str, result: dict):
-        """下载完成"""
-        # 更新状态栏
+        """下载完成 - 抖音下载"""
+        # 计算已完成的下载数（只统计当前视频）
+        if video_id in self.video_list.video_cards:
+            self.topbar.set_status(f"✅ 下载完成")
+
+        # 记录日志
+        total_videos = len(self.video_list.video_cards)
         success_count = sum(1 for card in self.video_list.video_cards.values()
                           if card.video_data.get("status") == "success")
-        self.topbar.set_status(f"已完成 {success_count} 个下载")
+        print(f"📊 下载完成统计 - 总视频数: {total_videos}, 成功: {success_count}")
 
         # 更新缩略图、文件大小和时长
         downloaded_files = result.get("downloaded_files", [])
@@ -268,6 +649,7 @@ class MainWindow(QMainWindow):
 
     def on_error_occurred(self, video_id: str, error_message: str):
         """错误发生"""
+        self.topbar.set_status(f"❌ 下载失败：{error_message[:50]}")
         QMessageBox.warning(self, "下载失败", f"视频下载失败：\n{error_message}")
 
     def open_directory(self, path: str):

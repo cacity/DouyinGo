@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-DouyinGo - 抖音视频下载工具
+VideoGo - 多平台视频下载工具
 主入口文件
 """
 
@@ -27,9 +27,9 @@ def setup_app():
 
     # 创建应用
     app = QApplication(sys.argv)
-    app.setApplicationName("DouyinGo")
-    app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("DouyinGo")
+    app.setApplicationName("VideoGo")
+    app.setApplicationVersion("2.0.0")
+    app.setOrganizationName("VideoGo")
 
     # 设置应用图标
     icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "icons8-youtube-100.png")
@@ -48,12 +48,15 @@ def setup_app():
 def main():
     """主函数"""
     print("=" * 60)
-    print("DouyinGo - 抖音视频下载工具 v1.0.2")
+    print("VideoGo - 多平台视频下载工具 v2.0.0")
     print("=" * 60)
     print()
-    print("✨ 使用纯 Python 实现，无需额外服务")
+    print("🎵 支持抖音视频下载")
+    print("📺 支持YouTube视频下载")
+    print("🐦 支持Twitter/X视频下载")
+    print("✨ 使用 yt-dlp 核心，稳定可靠")
     print("🎬 支持无水印视频下载")
-    print("📸 支持图片集下载")
+    print("📸 支持缩略图下载")
     print()
 
     # 创建应用
