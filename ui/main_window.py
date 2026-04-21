@@ -23,6 +23,7 @@ from ui.styles import MAIN_WINDOW_STYLE
 from core.downloader import DownloadManager
 from core.youtube_downloader import YouTubeDownloader
 from core.twitter_downloader import TwitterDownloader
+from core.koushare_downloader import KoushareDownloader
 from core.thumbnail_extractor import get_video_duration, format_duration
 
 
@@ -35,6 +36,8 @@ class MainWindow(QMainWindow):
         self.download_manager = DownloadManager()
         self.youtube_downloader = YouTubeDownloader()
         self.twitter_downloader = TwitterDownloader()
+        self.koushare_downloader = KoushareDownloader()
+        self.current_quality = "原画"
         self.download_workers = {}  # 保存活跃的下载工作线程
         self.init_ui()
         self.connect_signals()
@@ -114,6 +117,8 @@ class MainWindow(QMainWindow):
             return self.extract_youtube_url(text)
         elif platform == "twitter":
             return self.extract_twitter_url(text)
+        elif platform == "koushare":
+            return self.extract_koushare_url(text)
         else:
             return text
 
@@ -198,6 +203,13 @@ class MainWindow(QMainWindow):
 
         return text
 
+    def extract_koushare_url(self, text: str) -> str:
+        """
+        从文本中提取寇享链接
+        """
+        extracted_url = self.koushare_downloader.extract_koushare_url_from_text(text)
+        return extracted_url or text.strip()
+
     def on_paste_clicked(self):
         """粘贴按钮点击"""
         # 获取剪贴板内容
@@ -215,7 +227,8 @@ class MainWindow(QMainWindow):
             platform_names = {
                 "douyin": "抖音",
                 "youtube": "YouTube",
-                "twitter": "Twitter/X"
+                "twitter": "Twitter/X",
+                "koushare": "寇享"
             }
             platform_name = platform_names.get(self.current_platform, "当前平台")
 
@@ -234,6 +247,8 @@ class MainWindow(QMainWindow):
                 self.add_youtube_download(url)
             elif self.current_platform == "twitter":
                 self.add_twitter_download(url)
+            elif self.current_platform == "koushare":
+                self.add_koushare_download(url)
 
             self.topbar.set_status(f"已添加下载任务 (共 {self.video_list.get_video_count()} 个)")
         except Exception as e:
@@ -248,6 +263,8 @@ class MainWindow(QMainWindow):
             return "youtube.com" in url or "youtu.be" in url
         elif platform == "twitter":
             return "twitter.com" in url or "x.com" in url
+        elif platform == "koushare":
+            return self.koushare_downloader.is_koushare_url(url)
         return False
 
     def get_supported_formats(self, platform: str) -> str:
@@ -255,7 +272,8 @@ class MainWindow(QMainWindow):
         formats = {
             "douyin": "- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx",
             "youtube": "- https://www.youtube.com/watch?v=xxxxx\n- https://youtu.be/xxxxx\n- https://www.youtube.com/shorts/xxxxx",
-            "twitter": "- https://twitter.com/user/status/xxxxx\n- https://x.com/user/status/xxxxx"
+            "twitter": "- https://twitter.com/user/status/xxxxx\n- https://x.com/user/status/xxxxx",
+            "koushare": "- https://www.koushare.com/live/details/xxxxx?vid=xxxxx\n- https://www.koushare.com/video/details/xxxxx"
         }
         return formats.get(platform, "未知格式")
 
@@ -270,8 +288,8 @@ class MainWindow(QMainWindow):
 
     def on_quality_changed(self, quality: str):
         """质量改变"""
+        self.current_quality = quality
         print(f"质量改变: {quality}")
-        # TODO: 实现质量切换逻辑
 
     def on_format_changed(self, format_type: str):
         """格式改变"""
@@ -405,6 +423,50 @@ class MainWindow(QMainWindow):
         except Exception as e:
             raise Exception(f"Twitter下载失败: {str(e)}")
 
+    def add_koushare_download(self, url: str):
+        """添加寇享下载任务"""
+        import hashlib
+
+        video_id = hashlib.md5(f"koushare_{url}".encode()).hexdigest()[:16]
+
+        try:
+            video_info = self.koushare_downloader.get_video_info(url)
+
+            if video_info:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": video_info.get("title", "寇享视频")[:50],
+                    "format": "MP4",
+                    "size": video_info.get("file_size", "未知"),
+                    "resolution": video_info.get("resolution", "未知"),
+                    "duration": video_info.get("duration_string", "未知"),
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": video_info.get("thumbnail"),
+                    "platform": "koushare"
+                }
+            else:
+                video_data = {
+                    "id": video_id,
+                    "url": url,
+                    "title": "寇享视频",
+                    "format": "MP4",
+                    "size": "未知",
+                    "resolution": "未知",
+                    "duration": "未知",
+                    "status": "pending",
+                    "progress": 0,
+                    "thumbnail": None,
+                    "platform": "koushare"
+                }
+
+            self.video_list.add_video(video_data)
+            self.start_koushare_download(video_id, url)
+
+        except Exception as e:
+            raise Exception(f"寇享下载失败: {str(e)}")
+
     def _cleanup_worker(self, video_id: str):
         """清理完成的工作线程"""
         if video_id in self.download_workers:
@@ -510,6 +572,58 @@ class MainWindow(QMainWindow):
         self.download_workers[video_id] = worker
         worker.start()
 
+    def start_koushare_download(self, video_id: str, url: str):
+        """开始寇享下载"""
+        class KoushareDownloadWorker(QThread):
+            progress_updated = pyqtSignal(str, int, str)
+            status_changed = pyqtSignal(str, str)
+            download_completed = pyqtSignal(str, dict)
+            error_occurred = pyqtSignal(str, str)
+
+            def __init__(self, video_id, url, downloader, quality):
+                super().__init__()
+                self.video_id = video_id
+                self.url = url
+                self.downloader = downloader
+                self.quality = quality
+
+            def run(self):
+                try:
+                    self.status_changed.emit(self.video_id, "downloading")
+                    self.progress_updated.emit(self.video_id, 10, "正在解析视频...")
+
+                    def progress_callback(progress, message):
+                        self.progress_updated.emit(self.video_id, progress, message)
+
+                    result = self.downloader.download_video(
+                        self.url,
+                        quality=self.quality,
+                        progress_callback=progress_callback
+                    )
+
+                    if result.get("success"):
+                        self.progress_updated.emit(self.video_id, 100, "下载完成")
+                        self.status_changed.emit(self.video_id, "success")
+                        self.download_completed.emit(self.video_id, result)
+                    else:
+                        error = result.get("error", "未知错误")
+                        self.status_changed.emit(self.video_id, "error")
+                        self.error_occurred.emit(self.video_id, error)
+
+                except Exception as e:
+                    self.status_changed.emit(self.video_id, "error")
+                    self.error_occurred.emit(self.video_id, str(e))
+
+        worker = KoushareDownloadWorker(video_id, url, self.koushare_downloader, self.current_quality)
+        worker.progress_updated.connect(self.on_progress_updated)
+        worker.status_changed.connect(self.on_status_changed)
+        worker.download_completed.connect(self.on_koushare_download_completed)
+        worker.error_occurred.connect(self.on_error_occurred)
+        worker.finished.connect(lambda: self._cleanup_worker(video_id))
+
+        self.download_workers[video_id] = worker
+        worker.start()
+
     def on_youtube_download_completed(self, video_id: str, result: dict):
         """YouTube下载完成处理"""
         # 显示状态
@@ -531,6 +645,15 @@ class MainWindow(QMainWindow):
         print(f"📊 Twitter/X下载完成 - 视频ID: {video_id}, 总视频数: {total_videos}")
 
         self.handle_download_completed(video_id, result, "Twitter/X")
+
+    def on_koushare_download_completed(self, video_id: str, result: dict):
+        """寇享下载完成处理"""
+        self.topbar.set_status("✅ 寇享下载完成")
+
+        total_videos = len(self.video_list.video_cards)
+        print(f"📊 寇享下载完成 - 视频ID: {video_id}, 总视频数: {total_videos}")
+
+        self.handle_download_completed(video_id, result, "寇享")
 
     def handle_download_completed(self, video_id: str, result: dict, platform: str):
         """通用下载完成处理"""

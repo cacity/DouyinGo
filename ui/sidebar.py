@@ -65,6 +65,9 @@ class Sidebar(QWidget):
         self.twitter_btn = self.create_platform_button("🐦\nTwitter/X", "twitter")
         layout.addWidget(self.twitter_btn)
 
+        self.koushare_btn = self.create_platform_button("📚\n寇享", "koushare")
+        layout.addWidget(self.koushare_btn)
+
         # 分隔线
         layout.addSpacing(10)
         function_label = QLabel("功能")

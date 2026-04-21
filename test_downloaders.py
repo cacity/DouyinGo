@@ -11,8 +11,10 @@ import os
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from PyQt5.QtWidgets import QApplication
 from core.youtube_downloader import YouTubeDownloader
 from core.twitter_downloader import TwitterDownloader
+from core.koushare_downloader import KoushareDownloader
 
 
 def test_youtube_downloader():
@@ -92,6 +94,42 @@ def test_twitter_downloader():
     print()
 
 
+def test_koushare_downloader():
+    """测试寇享下载器"""
+    print("=" * 50)
+    print("测试 寇享 下载器")
+    print("=" * 50)
+
+    downloader = KoushareDownloader()
+
+    test_urls = [
+        "https://www.koushare.com/live/details/44288?vid=183306",
+        "https://www.koushare.com/video/details/203628",
+        "https://www.koushare.com/video/videodetail/203628",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    ]
+
+    for url in test_urls:
+        is_koushare = downloader.is_koushare_url(url)
+        print(f"URL: {url}")
+        print(f"是否为寇享链接: {is_koushare}")
+        print()
+
+    test_texts = [
+        "看看这个回放 https://www.koushare.com/live/details/44288?vid=183306",
+        "视频详情 https://www.koushare.com/video/details/203628",
+        "没有链接的文本"
+    ]
+
+    for text in test_texts:
+        extracted_url = downloader.extract_koushare_url_from_text(text)
+        print(f"文本: {text}")
+        print(f"提取的URL: {extracted_url}")
+        print()
+
+    print()
+
+
 def test_url_extraction():
     """测试URL提取功能"""
     print("=" * 50)
@@ -100,6 +138,8 @@ def test_url_extraction():
 
     # 导入主窗口模块的URL提取函数
     from ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
 
     # 创建临时主窗口实例来测试URL提取
     main_window = MainWindow()
@@ -119,6 +159,16 @@ def test_url_extraction():
             "platform": "douyin",
             "text": "抖音视频 https://v.douyin.com/abcd1234/ 真好看",
             "expected": "https://v.douyin.com/abcd1234/"
+        },
+        {
+            "platform": "koushare",
+            "text": "回放地址 https://www.koushare.com/live/details/44288?vid=183306",
+            "expected": "https://www.koushare.com/live/details/44288?vid=183306"
+        },
+        {
+            "platform": "koushare",
+            "text": "详情页 https://www.koushare.com/video/details/203628",
+            "expected": "https://www.koushare.com/video/details/203628"
         }
     ]
 
@@ -150,6 +200,9 @@ def main():
 
     # 测试Twitter下载器
     test_twitter_downloader()
+
+    # 测试寇享下载器
+    test_koushare_downloader()
 
     # 测试URL提取功能
     test_url_extraction()

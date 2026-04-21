@@ -12,8 +12,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.downloader import DownloadManager, DownloadWorker
+from core.koushare_downloader import KoushareDownloader
 
 __all__ = [
     'DownloadManager',
-    'DownloadWorker'
+    'DownloadWorker',
+    'KoushareDownloader'
 ]

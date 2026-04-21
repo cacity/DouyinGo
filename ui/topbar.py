@@ -118,7 +118,8 @@ class TopBar(QWidget):
         platform_map = {
             "douyin": "🎵 抖音",
             "youtube": "📺 YouTube",
-            "twitter": "🐦 Twitter/X"
+            "twitter": "🐦 Twitter/X",
+            "koushare": "📚 寇享"
         }
         platform_text = platform_map.get(platform, "🎵 抖音")
         self.platform_label.setText(platform_text)
@@ -139,6 +140,10 @@ class TopBar(QWidget):
         elif platform == "twitter":
             self.quality_combo.addItems([
                 "最佳质量", "1080p", "720p", "480p", "360p"
+            ])
+        elif platform == "koushare":
+            self.quality_combo.addItems([
+                "最佳质量", "1080p", "720p", "480p"
             ])
         else:  # douyin
             self.quality_combo.addItems([

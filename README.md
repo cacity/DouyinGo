@@ -9,7 +9,7 @@
 
 **多平台视频下载工具 | Multi-Platform Video Downloader**
 
-基于 PyQt5 的多平台视频下载工具，支持抖音、YouTube、Twitter/X 视频下载
+基于 PyQt5 的多平台视频下载工具，支持抖音、YouTube、Twitter/X、寇享（Koushare）视频下载
 
 [功能特性](#-功能特性) • [安装使用](#-安装使用) • [使用说明](#-使用说明) • [项目结构](#-项目结构)
 
@@ -35,6 +35,11 @@
 - **🔗 链接识别** - 自动识别推文中的视频链接
 - **⚡ 快速下载** - 优化的下载体验
 
+### 📚 寇享下载
+- **📺 回放与视频页支持** - 支持直播回放页和视频详情页下载
+- **🎞️ HLS 下载** - 通过 ffmpeg 下载并合并 m3u8 视频流
+- **🔽 画质回退** - 优先请求高画质，不可用时自动回退
+
 ### 🎨 界面特性
 - **🎯 平台切换** - 直观的平台选择界面
 - **📊 实时进度** - 下载进度实时显示
@@ -56,7 +61,7 @@
 ## 🛠️ 技术栈
 
 - **GUI 框架**: PyQt5
-- **下载引擎**: yt-dlp (多平台统一下载)
+- **下载引擎**: yt-dlp + 平台定制下载器
 - **HTTP 请求**: requests + httpx
 - **视频处理**: ffmpeg (用于缩略图提取)
 - **日志系统**: loguru
@@ -103,7 +108,7 @@ python main.py
 
 ### 基本使用流程
 
-1. **选择平台** - 在左侧边栏选择要下载的平台（抖音/YouTube/Twitter）
+1. **选择平台** - 在左侧边栏选择要下载的平台（抖音/YouTube/Twitter/寇享）
 2. **复制链接** - 复制对应平台的视频链接
 3. **粘贴下载** - 点击「粘贴链接」按钮，程序自动识别并下载
 4. **查看进度** - 实时查看下载进度和状态
@@ -129,6 +134,12 @@ python main.py
 - `https://www.twitter.com/i/web/status/[推文ID]`
 - `https://www.x.com/i/web/status/[推文ID]`
 
+#### 寇享 / Koushare
+- `https://www.koushare.com/live/details/[liveId]?vid=[videoId]`
+- `https://www.koushare.com/live/details/[liveId]?videoId=[videoId]`
+- `https://www.koushare.com/video/details/[videoId]`
+- `https://www.koushare.com/video/videodetail/[videoId]`
+
 ### 平台特色功能
 
 #### 抖音平台
@@ -147,6 +158,12 @@ python main.py
 - 快速下载体验
 - 自动识别推文视频
 
+#### 寇享平台
+- 支持直播回放链接与视频详情页链接
+- 通过 Koushare 接口获取播放地址
+- 使用 ffmpeg 下载 HLS 视频流
+- 高画质不可用时自动回退
+
 ## 📁 项目结构
 
 ```
@@ -161,7 +178,8 @@ douyin_app/
 │   ├── pure_python_extractor.py # 抖音解析器
 │   ├── thumbnail_extractor.py  # 缩略图处理
 │   ├── youtube_downloader.py   # YouTube下载器
-│   └── twitter_downloader.py   # Twitter下载器
+│   ├── twitter_downloader.py   # Twitter下载器
+│   └── koushare_downloader.py  # 寇享下载器
 ├── ui/                         # 用户界面模块
 │   ├── __init__.py
 │   ├── main_window.py          # 主窗口
@@ -174,13 +192,14 @@ douyin_app/
 │       └── icons8-youtube-100.png
 ├── douyin_downloads/           # 抖音下载目录
 ├── youtube_downloads/          # YouTube下载目录
-└── twitter_downloads/          # Twitter下载目录
+├── twitter_downloads/          # Twitter下载目录
+└── koushare_downloads/         # 寇享下载目录
 ```
 
 ## 🔧 技术实现
 
 ### 核心架构
-- **下载引擎**: yt-dlp (统一的多平台视频下载)
+- **下载引擎**: yt-dlp + 平台定制下载器
 - **GUI框架**: PyQt5 (跨平台桌面应用)
 - **网络请求**: requests + httpx
 - **视频处理**: FFmpeg
@@ -195,7 +214,7 @@ douyin_app/
 
 ### 下载流程
 1. **URL识别**: 正则表达式匹配平台URL
-2. **信息获取**: 调用yt-dlp获取视频元信息
+2. **信息获取**: 调用平台解析逻辑获取视频元信息
 3. **参数配置**: 根据用户选择配置下载参数
 4. **异步下载**: QThread工作线程执行下载
 5. **结果处理**: 更新界面和文件信息
@@ -204,7 +223,11 @@ douyin_app/
 
 ### 下载目录
 
-默认下载目录：`douyin_downloads/`
+默认按平台分别保存到下载目录中：
+- `douyin_downloads/`
+- `youtube_downloads/`
+- `twitter_downloads/`
+- `koushare_downloads/`
 
 可以在设置中修改下载路径。
 
@@ -232,8 +255,11 @@ python test_core_functions.py
 ### v2.0.0 (当前版本)
 - ✨ 新增YouTube视频下载支持
 - ✨ 新增Twitter/X视频下载支持
+- ✨ 新增寇享（Koushare）视频下载支持
+- 🎞️ 支持寇享直播回放页与视频详情页链接
+- 🔽 支持寇享 HLS 下载与画质自动回退
 - 🎨 全新界面设计，支持平台切换
-- 🔧 重构下载器架构，统一yt-dlp引擎
+- 🔧 重构下载器架构，支持平台定制下载器
 - 📱 优化用户体验和界面交互
 - 🚀 升级依赖包，支持最新功能
 
@@ -254,10 +280,13 @@ python test_core_functions.py
 
 ## ⚠️ 注意事项
 
+> 本项目仅供合法用途使用。
+> 在使用下载、解析、平台链接处理等功能前，请先阅读 [DISCLAIMER.md](./DISCLAIMER.md)。
+
 1. **网络环境**: 某些地区可能需要代理才能访问YouTube/Twitter
-2. **版权声明**: 请尊重视频内容版权，仅下载个人使用的视频
+2. **版权声明**: 请尊重视频内容版权，仅在有合法权限的前提下下载和使用内容
 3. **存储空间**: 确保有足够的磁盘空间存储下载的视频
-4. **法律合规**: 使用本工具请遵守当地法律法规
+4. **法律合规**: 使用本工具请遵守当地法律法规及平台服务条款
 
 ## 🔮 未来计划
 
@@ -270,6 +299,8 @@ python test_core_functions.py
 - [ ] 开发命令行版本
 
 ## ⚠️ 免责声明
+
+详细使用与免责说明请见 [DISCLAIMER.md](./DISCLAIMER.md)。
 
 本工具仅供学习交流使用，请勿用于商业用途。
 

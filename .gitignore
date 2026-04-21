@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Download output directories
+*_downloads/
+douyin_downloads/
+youtube_downloads/
+twitter_downloads/
+koushare_downloads/
+
+# Test-generated directories
+test_*_downloads/

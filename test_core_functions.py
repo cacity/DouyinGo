@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.youtube_downloader import YouTubeDownloader
 from core.twitter_downloader import TwitterDownloader
+from core.koushare_downloader import KoushareDownloader
 
 
 def test_url_recognition():
@@ -24,6 +25,7 @@ def test_url_recognition():
 
     youtube_downloader = YouTubeDownloader()
     twitter_downloader = TwitterDownloader()
+    koushare_downloader = KoushareDownloader()
 
     test_urls = {
         "YouTube": [
@@ -39,6 +41,12 @@ def test_url_recognition():
             "https://www.twitter.com/i/web/status/1234567890",
             "https://www.x.com/i/web/status/1234567890",
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # 非Twitter链接
+        ],
+        "寇享": [
+            "https://www.koushare.com/live/details/44288?vid=183306",
+            "https://www.koushare.com/video/details/203628",
+            "https://www.koushare.com/video/videodetail/203628",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         ]
     }
 
@@ -47,8 +55,10 @@ def test_url_recognition():
         for url in urls:
             if platform == "YouTube":
                 is_valid = youtube_downloader.is_youtube_url(url)
-            else:
+            elif platform == "Twitter/X":
                 is_valid = twitter_downloader.is_twitter_url(url)
+            else:
+                is_valid = koushare_downloader.is_koushare_url(url)
 
             print(f"  {url}")
             print(f"    识别结果: {'✓' if is_valid else '✗'}")
@@ -119,6 +129,24 @@ def test_url_extraction():
 
         return text
 
+    def extract_koushare_url(text: str) -> str:
+        patterns = [
+            r'https?://(?:www\.)?koushare\.com/live/details/\d+\?(?:[^\s]*&)?(?:vid|videoId)=\d+[^\s]*',
+            r'https?://(?:www\.)?koushare\.com/video/details/\d+[^\s]*',
+            r'https?://(?:www\.)?koushare\.com/video/videodetail/\d+[^\s]*',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(0)
+
+        text = text.strip()
+        if text.startswith('http') and 'koushare.com' in text:
+            return text.split()[0]
+
+        return text
+
     test_cases = [
         {
             "platform": "YouTube",
@@ -149,6 +177,16 @@ def test_url_extraction():
             "platform": "抖音",
             "text": "这个也不错 https://www.douyin.com/video/1234567890",
             "extractor": extract_douyin_url
+        },
+        {
+            "platform": "寇享",
+            "text": "看看这个回放 https://www.koushare.com/live/details/44288?vid=183306 很有用",
+            "extractor": extract_koushare_url
+        },
+        {
+            "platform": "寇享",
+            "text": "视频详情页 https://www.koushare.com/video/details/203628",
+            "extractor": extract_koushare_url
         }
     ]
 
@@ -181,11 +219,18 @@ def test_downloader_initialization():
         print("✓ Twitter下载器初始化成功")
         print(f"  下载目录: {twitter_downloader.download_dir}")
 
+        # 测试寇享下载器
+        koushare_downloader = KoushareDownloader("test_koushare_downloads")
+        print("✓ 寇享下载器初始化成功")
+        print(f"  下载目录: {koushare_downloader.download_dir}")
+
         # 检查目录是否创建
         if os.path.exists("test_youtube_downloads"):
             print("✓ YouTube下载目录创建成功")
         if os.path.exists("test_twitter_downloads"):
             print("✓ Twitter下载目录创建成功")
+        if os.path.exists("test_koushare_downloads"):
+            print("✓ 寇享下载目录创建成功")
 
     except Exception as e:
         print(f"✗ 下载器初始化失败: {e}")
@@ -199,6 +244,7 @@ def test_format_selection():
 
     youtube_downloader = YouTubeDownloader()
     twitter_downloader = TwitterDownloader()
+    koushare_downloader = KoushareDownloader()
 
     qualities = ["best", "worst", "1080p", "720p", "480p"]
 
@@ -211,6 +257,11 @@ def test_format_selection():
     for quality in qualities:
         format_selector = twitter_downloader._get_format_selector(quality)
         print(f"  {quality}: {format_selector}")
+
+    print("\n寇享画质映射:")
+    for quality in ["最佳质量", "1080p", "720p", "480p", "原画"]:
+        mapped_quality = koushare_downloader._map_quality(quality)
+        print(f"  {quality}: {mapped_quality}")
 
 
 def main():
