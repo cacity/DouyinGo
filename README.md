@@ -15,6 +15,17 @@
 
 </div>
 
+## Need a Production Video Workflow?
+
+VideoGo remains free and open source. If you need batch processing, transcription, subtitle translation, AI dubbing, multi-episode automation, or a team-local deployment, see [VideoHub](https://github.com/cacity/VideoHub) and its [fixed-scope services](https://github.com/cacity/VideoHub/blob/main/SERVICES.md).
+
+- Async environment diagnosis: **USD 149**
+- QuickStart setup: **USD 299**
+- Creator workflow: **USD 999**
+- Team local deployment: **USD 2,999**
+
+Contact: **stark fng** — [gf7823332@gmail.com](mailto:gf7823332@gmail.com). Please do not send passwords, tokens, cookies, or private media in the first message.
+
 ---
 
 ## ✨ 功能特性
