@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Paid implementation support / 付费实施支持
+    url: https://github.com/cacity/VideoHub/issues/new?template=paid-support.yml
+    about: Fixed-scope diagnosis, setup, creator workflows, and team deployment from USD 149. Do not post secrets or private media.
+  - name: VideoHub service scope / VideoHub 服务范围
+    url: https://github.com/cacity/VideoHub/blob/main/SERVICES.md
+    about: Review prices, deliverables, acceptance checks, exclusions, and the public intake process before requesting support.
