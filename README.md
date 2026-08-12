@@ -24,7 +24,7 @@ VideoGo remains free and open source. If you need batch processing, transcriptio
 - Creator workflow: **USD 999**
 - Team local deployment: **USD 2,999**
 
-Contact: **stark fng** — [gf7823332@gmail.com](mailto:gf7823332@gmail.com). Please do not send passwords, tokens, cookies, or private media in the first message.
+Contact: **stark fng** — open a [public VideoHub paid-support request](https://github.com/cacity/VideoHub/issues/new?template=paid-support.yml). Requests and follow-ups are not handled by email. Never post passwords, tokens, cookies, private media, customer data, or personal data in a public Issue.
 
 ---
 
