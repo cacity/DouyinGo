@@ -411,6 +411,15 @@ class KoushareDownloader:
         return f"{best_height}p" if best_height else "未知"
 
     def _get_ffmpeg_executable(self) -> str:
+        try:
+            from backend.ffmpeg_tools import find_ffmpeg
+
+            ffmpeg_path = find_ffmpeg()
+            if ffmpeg_path:
+                return ffmpeg_path
+        except Exception:
+            pass
+
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         local_windows_ffmpeg = os.path.join(project_root, "ffmpeg.exe")
         if platform.system() == "Windows" and os.path.exists(local_windows_ffmpeg):

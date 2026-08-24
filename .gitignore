@@ -1,6 +1,20 @@
 # Python cache
 __pycache__/
 *.pyc
+*.log
+
+# Python sidecar packaging
+build/
+*.spec
+
+# React/Tauri desktop build output
+node_modules/
+.npm-cache/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
 
 # Download output directories
 *_downloads/

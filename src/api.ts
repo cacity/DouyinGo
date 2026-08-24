@@ -1,0 +1,89 @@
+import { invoke } from "@tauri-apps/api/core";
+import type { AIModelInfo, DownloadJob, Platform, ToolInfo } from "./types";
+
+export async function ensureBackend(): Promise<string> {
+  const configured = import.meta.env.VITE_DOUYINGO_BACKEND_URL;
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  try {
+    const url = await invoke<string>("ensure_backend");
+    return url.replace(/\/$/, "");
+  } catch {
+    return "http://127.0.0.1:8765";
+  }
+}
+
+async function apiFetch<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {})
+    },
+    ...init
+  });
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // Keep HTTP status text.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export function getHealth(baseUrl: string) {
+  return apiFetch<{ ok: boolean; version: string; service: string; time: string }>(baseUrl, "/health");
+}
+
+export function getDownloads(baseUrl: string) {
+  return apiFetch<DownloadJob[]>(baseUrl, "/api/downloads");
+}
+
+export function createDownload(
+  baseUrl: string,
+  payload: {
+    text: string;
+    platform: Platform;
+    options: {
+      quality: string;
+      format: string;
+      download_type: "video" | "audio" | "cover";
+      save_metadata: boolean;
+      ai_model_id?: string | null;
+    };
+  }
+) {
+  return apiFetch<DownloadJob>(baseUrl, "/api/downloads", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function cancelDownload(baseUrl: string, jobId: string) {
+  return apiFetch<DownloadJob>(baseUrl, `/api/downloads/${jobId}/cancel`, {
+    method: "POST"
+  });
+}
+
+export function getTools(baseUrl: string) {
+  return apiFetch<ToolInfo[]>(baseUrl, "/api/tools");
+}
+
+export function getModels(baseUrl: string) {
+  return apiFetch<AIModelInfo[]>(baseUrl, "/api/models");
+}
+
+export async function revealPath(path: string): Promise<void> {
+  try {
+    await invoke("reveal_path", { path });
+  } catch {
+    throw new Error("Only the Tauri desktop shell can reveal files.");
+  }
+}

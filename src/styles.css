@@ -1,0 +1,473 @@
+:root {
+  font-family:
+    Inter, "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #20242b;
+  background: #eef1f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --ink: #20242b;
+  --muted: #667085;
+  --line: #d8dde6;
+  --panel: #ffffff;
+  --soft: #f6f8fb;
+  --success: #16803c;
+  --danger: #c93434;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 980px;
+  min-height: 100vh;
+  background: #eef1f5;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.appShell {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border-right: 1px solid var(--line);
+  background: #f8fafc;
+  padding: 18px 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 8px;
+  color: var(--accent-strong);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.platformNav {
+  display: grid;
+  gap: 6px;
+}
+
+.platformNav button,
+.sidebarFooter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #344054;
+  background: transparent;
+}
+
+.platformNav button {
+  cursor: pointer;
+  text-align: left;
+}
+
+.platformNav button:hover {
+  background: #e8edf5;
+}
+
+.platformNav button.active {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.sidebarFooter {
+  margin-top: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 14px 18px;
+}
+
+.downloadForm {
+  display: grid;
+  grid-template-columns: 40px minmax(220px, 1fr) 94px 132px 92px 140px 96px;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.downloadForm input,
+.downloadForm select {
+  min-width: 0;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 12px;
+}
+
+.downloadForm input:focus,
+.downloadForm select:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+  border-color: var(--accent);
+}
+
+.iconButton,
+.primaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.iconButton {
+  width: 40px;
+  color: #344054;
+  background: #edf1f7;
+}
+
+.iconButton:hover {
+  background: #dfe6f1;
+}
+
+.iconButton.danger {
+  color: var(--danger);
+}
+
+.primaryButton {
+  padding: 0 14px;
+  color: #ffffff;
+  background: var(--accent);
+  font-weight: 700;
+}
+
+.primaryButton:hover {
+  background: var(--accent-strong);
+}
+
+.backendPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 148px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.backendPill.online {
+  color: var(--success);
+}
+
+.backendPill.offline {
+  color: var(--danger);
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #f4c7c7;
+  background: #fff1f1;
+  color: #8a1f1f;
+  padding: 10px 18px;
+}
+
+.contentGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  padding: 18px;
+}
+
+.taskSection,
+.inventoryPanel {
+  min-width: 0;
+}
+
+.sectionHeader,
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sectionHeader h1,
+.panelHeader h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.taskList {
+  display: grid;
+  gap: 10px;
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.taskRow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 92px;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.taskStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+}
+
+.taskStatus .lucide-loader-circle {
+  animation: spin 1s linear infinite;
+}
+
+.taskMain {
+  min-width: 0;
+}
+
+.taskTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.taskTitleRow h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusTag {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: #344054;
+  background: #eef2f7;
+  font-size: 12px;
+}
+
+.statusTag.success {
+  color: var(--success);
+  background: #e9f7ed;
+}
+
+.statusTag.error {
+  color: var(--danger);
+  background: #ffecec;
+}
+
+.statusTag.downloading,
+.statusTag.resolving {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.taskMeta,
+.taskMessage {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskMeta {
+  display: flex;
+  gap: 12px;
+  margin-top: 5px;
+}
+
+.progressTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6eaf1;
+  margin: 10px 0 7px;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms ease;
+}
+
+.taskActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inventoryPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.panelBlock {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 14px;
+}
+
+.panelHeader {
+  justify-content: flex-start;
+  color: #344054;
+}
+
+.inventoryList {
+  display: grid;
+  gap: 8px;
+}
+
+.inventoryRow {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 42px;
+  border-top: 1px solid #eef1f5;
+  padding-top: 8px;
+}
+
+.inventoryRow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.inventoryRow strong,
+.inventoryRow span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventoryRow strong {
+  font-size: 13px;
+}
+
+.inventoryRow span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inventoryRow em {
+  font-style: normal;
+  font-size: 12px;
+}
+
+.inventoryRow em.ok {
+  color: var(--success);
+}
+
+.inventoryRow em.missing {
+  color: #9a6700;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1120px) {
+  body {
+    min-width: 760px;
+  }
+
+  .appShell {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .brand span,
+  .platformNav span,
+  .sidebarFooter span {
+    display: none;
+  }
+
+  .platformNav button,
+  .sidebarFooter,
+  .brand {
+    justify-content: center;
+  }
+
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .downloadForm {
+    grid-template-columns: 40px minmax(180px, 1fr) 90px 116px 86px 96px;
+  }
+
+  .downloadForm select:nth-of-type(4) {
+    display: none;
+  }
+}

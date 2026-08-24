@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+
+from core.koushare_downloader import KoushareDownloader
+from core.pure_python_extractor import PurePythonExtractor
+from core.twitter_downloader import TwitterDownloader
+from core.youtube_downloader import YouTubeDownloader
+
+from backend.schemas import (
+    DownloadJob,
+    DownloadOptions,
+    DownloadRequest,
+    DownloadedFile,
+    JobStatus,
+    Platform,
+)
+from backend.url_utils import default_output_dir, extract_url
+
+
+QUALITY_ALIASES = {
+    "最佳质量": "best",
+    "原画": "best",
+    "4K": "4k",
+    "2K(1440p)": "1440p",
+    "超清(1080p)": "1080p",
+    "高清(720p)": "720p",
+    "标清(480p)": "480p",
+}
+
+
+class DownloadService:
+    def __init__(self, project_root: Path | None = None, max_workers: int = 3):
+        self.project_root = project_root or Path(__file__).resolve().parents[1]
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="download")
+        self._jobs: dict[str, DownloadJob] = {}
+        self._cancel_requested: set[str] = set()
+        self._lock = threading.RLock()
+
+    def create_download(self, request: DownloadRequest) -> DownloadJob:
+        resolved = extract_url(request.text, request.platform)
+        platform = request.platform or resolved.platform
+        if platform == Platform.UNKNOWN or not resolved.supported:
+            raise ValueError("Unsupported or unrecognized video URL")
+
+        output_dir = request.options.output_dir or default_output_dir(platform)
+        output_path = Path(output_dir)
+        if not output_path.is_absolute():
+            output_path = self.project_root / output_path
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        now = datetime.utcnow()
+        job = DownloadJob(
+            id=uuid.uuid4().hex,
+            url=resolved.url,
+            platform=platform,
+            title=_default_title(platform),
+            status=JobStatus.QUEUED,
+            progress=0,
+            message="Queued",
+            output_dir=str(output_path),
+            options=request.options,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with self._lock:
+            self._jobs[job.id] = job
+
+        self._executor.submit(self._run_download, job.id)
+        return job
+
+    def list_jobs(self) -> list[DownloadJob]:
+        with self._lock:
+            return sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
+
+    def get_job(self, job_id: str) -> DownloadJob | None:
+        with self._lock:
+            return self._jobs.get(job_id)
+
+    def cancel_job(self, job_id: str) -> DownloadJob | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            self._cancel_requested.add(job_id)
+            if job.status in {JobStatus.QUEUED, JobStatus.RESOLVING}:
+                job.status = JobStatus.CANCELLED
+                job.message = "Cancelled before download started"
+                job.updated_at = datetime.utcnow()
+            return job
+
+    def resolve_info(self, text: str, platform: Platform | None = None) -> dict[str, Any]:
+        resolved = extract_url(text, platform)
+        if not resolved.supported:
+            return {"resolved": resolved.model_dump(), "info": None}
+
+        downloader = self._create_downloader(resolved.platform, default_output_dir(resolved.platform))
+        info = downloader.get_video_info(resolved.url)
+        if hasattr(info, "to_dict"):
+            info = info.to_dict()
+        return {"resolved": resolved.model_dump(), "info": info}
+
+    def _run_download(self, job_id: str):
+        job = self.get_job(job_id)
+        if not job:
+            return
+
+        try:
+            if self._is_cancelled(job_id):
+                self._update_job(job_id, status=JobStatus.CANCELLED, message="Cancelled")
+                return
+
+            self._update_job(job_id, status=JobStatus.RESOLVING, progress=3, message="Resolving media")
+            downloader = self._create_downloader(job.platform, job.output_dir)
+
+            try:
+                info = downloader.get_video_info(job.url)
+                title = _title_from_info(info, job.platform)
+                if title:
+                    self._update_job(job_id, title=title)
+            except Exception:
+                # A failed preflight should not block downloaders that can resolve during download.
+                pass
+
+            if self._is_cancelled(job_id):
+                self._update_job(job_id, status=JobStatus.CANCELLED, message="Cancelled")
+                return
+
+            self._update_job(job_id, status=JobStatus.DOWNLOADING, progress=8, message="Starting download")
+
+            def progress_callback(progress: int, message: str):
+                if self._is_cancelled(job_id):
+                    raise RuntimeError("Download cancellation requested")
+                self._update_job(
+                    job_id,
+                    status=JobStatus.DOWNLOADING,
+                    progress=max(0, min(100, int(progress))),
+                    message=message,
+                )
+
+            result = self._download_with_platform_downloader(downloader, job, progress_callback)
+            if result.get("success"):
+                files = [_normalize_downloaded_file(item) for item in result.get("downloaded_files", [])]
+                title = result.get("title") or job.title
+                self._update_job(
+                    job_id,
+                    title=title,
+                    status=JobStatus.SUCCESS,
+                    progress=100,
+                    message="Download completed",
+                    downloaded_files=files,
+                    error=None,
+                )
+            else:
+                self._update_job(
+                    job_id,
+                    status=JobStatus.ERROR,
+                    message="Download failed",
+                    error=result.get("error", "Unknown error"),
+                )
+        except Exception as exc:
+            status = JobStatus.CANCELLED if self._is_cancelled(job_id) else JobStatus.ERROR
+            self._update_job(job_id, status=status, message=str(exc), error=str(exc))
+        finally:
+            with self._lock:
+                self._cancel_requested.discard(job_id)
+
+    def _create_downloader(self, platform: Platform, output_dir: str):
+        if platform == Platform.DOUYIN:
+            return PurePythonExtractor()
+        if platform == Platform.YOUTUBE:
+            return YouTubeDownloader(output_dir)
+        if platform == Platform.TWITTER:
+            return TwitterDownloader(output_dir)
+        if platform == Platform.KOUSHARE:
+            return KoushareDownloader(output_dir)
+        raise ValueError(f"Unsupported platform: {platform}")
+
+    def _download_with_platform_downloader(
+        self,
+        downloader: Any,
+        job: DownloadJob,
+        progress_callback: Callable[[int, str], None],
+    ) -> dict[str, Any]:
+        quality = _normalize_quality(job.platform, job.options.quality)
+        if job.platform == Platform.DOUYIN:
+            return downloader.download_video(job.url, job.output_dir, progress_callback)
+        return downloader.download_video(
+            job.url,
+            download_dir=job.output_dir,
+            quality=quality,
+            progress_callback=progress_callback,
+        )
+
+    def _update_job(self, job_id: str, **changes: Any) -> DownloadJob | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            data = job.model_dump()
+            data.update(changes)
+            data["updated_at"] = datetime.utcnow()
+            updated = DownloadJob.model_validate(data)
+            self._jobs[job_id] = updated
+            return updated
+
+    def _is_cancelled(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return job_id in self._cancel_requested or (
+                bool(job) and job.status == JobStatus.CANCELLED
+            )
+
+
+def _normalize_quality(platform: Platform, quality: str) -> str:
+    if platform == Platform.KOUSHARE:
+        return quality
+    return QUALITY_ALIASES.get(quality, quality).lower()
+
+
+def _default_title(platform: Platform) -> str:
+    names = {
+        Platform.DOUYIN: "Douyin video",
+        Platform.YOUTUBE: "YouTube video",
+        Platform.TWITTER: "Twitter/X video",
+        Platform.KOUSHARE: "Koushare video",
+    }
+    return names.get(platform, "Video")
+
+
+def _title_from_info(info: Any, platform: Platform) -> str | None:
+    if not info:
+        return None
+    if hasattr(info, "to_dict"):
+        info = info.to_dict()
+    if platform == Platform.DOUYIN:
+        return info.get("desc") or None
+    return info.get("title") or info.get("desc") or None
+
+
+def _normalize_downloaded_file(item: dict[str, Any]) -> DownloadedFile:
+    size = item.get("size")
+    if size is not None:
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            size = None
+    return DownloadedFile(
+        type=str(item.get("type", "file")),
+        path=str(item.get("path", "")),
+        size=size,
+        format=item.get("format"),
+        ext=item.get("ext"),
+        resolution=item.get("resolution"),
+        thumbnail=item.get("thumbnail"),
+        url=item.get("url"),
+    )

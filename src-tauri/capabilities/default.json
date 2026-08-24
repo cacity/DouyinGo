@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default desktop permissions for DouyinGo",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/douyingo-sidecar",
+          "sidecar": true,
+          "args": [
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            {
+              "validator": "\\d+"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
