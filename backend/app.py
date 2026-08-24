@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import __version__
-from backend.ai_models import configured_model_status
+from backend.ai_models import configured_model_status, get_model_runner
 from backend.download_service import DownloadService
 from backend.ffmpeg_tools import collect_tool_status
 from backend.runtime_paths import config_path, download_root
-from backend.schemas import DownloadJob, DownloadRequest, HealthResponse, ResolveRequest, ToolInfo
+from backend.schemas import (
+    DownloadJob,
+    DownloadRequest,
+    HealthResponse,
+    ResolveRequest,
+    SidecarConfig,
+    ToolInfo,
+)
 
 
 download_service = DownloadService(download_root())
@@ -32,16 +39,46 @@ def health() -> HealthResponse:
         ok=True,
         service="douyingo-sidecar",
         version=__version__,
-        time=datetime.utcnow(),
+        time=datetime.now(timezone.utc),
     )
 
 
-@app.get("/api/config")
-def get_config() -> dict:
+@app.get("/api/config", response_model=SidecarConfig)
+def get_config() -> SidecarConfig:
     path = config_path()
     if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+        return SidecarConfig()
+    try:
+        return SidecarConfig.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return SidecarConfig()
+
+
+@app.put("/api/config", response_model=SidecarConfig)
+def update_config(config: SidecarConfig) -> SidecarConfig:
+    if config.ai_model_id:
+        try:
+            get_model_runner(config.ai_model_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if config.output_dir:
+        try:
+            output_dir = download_service.project_root / config.output_dir
+            if not output_dir.is_absolute():
+                output_dir = output_dir.resolve()
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    path = config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return config
 
 
 @app.get("/api/tools", response_model=list[ToolInfo])

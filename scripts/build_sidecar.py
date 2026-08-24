@@ -13,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BINARIES_DIR = PROJECT_ROOT / "src-tauri" / "binaries"
+sys.path.insert(0, str(PROJECT_ROOT))
 MIN_YT_DLP_VERSION = (2026, 8, 19)
 EXCLUDED_MODULES = [
     "PyQt5",
@@ -90,13 +91,16 @@ def deno_binary() -> Path:
 
 
 def build_sidecar() -> Path:
+    from backend.ffmpeg_tools import find_ffmpeg, find_ffprobe
+
     extension = ".exe" if platform.system() == "Windows" else ""
     separator = ";" if platform.system() == "Windows" else ":"
     binary_paths = [deno_binary()]
-    for executable in ("ffmpeg", "ffprobe"):
-        local_path = PROJECT_ROOT / f"{executable}{extension}"
-        if local_path.exists():
-            binary_paths.append(local_path)
+    for executable_path in (find_ffmpeg(), find_ffprobe()):
+        if executable_path:
+            path = Path(executable_path).resolve()
+            if path not in binary_paths:
+                binary_paths.append(path)
 
     add_binaries: list[str] = []
     for binary_path in binary_paths:

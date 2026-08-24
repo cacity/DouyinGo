@@ -12,6 +12,8 @@ import sys
 from typing import Optional, Dict, Any, Callable
 from loguru import logger
 
+from core.ytdlp_media import collect_media_files, media_options, output_template
+
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -101,8 +103,15 @@ class YouTubeDownloader:
             logger.error(f"获取YouTube视频信息失败: {e}")
             return None
 
-    def download_video(self, url: str, download_dir: Optional[str] = None,
-                      quality: str = "best", progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    def download_video(
+        self,
+        url: str,
+        download_dir: Optional[str] = None,
+        quality: str = "best",
+        progress_callback: Optional[Callable] = None,
+        download_type: str = "video",
+        output_format: str = "mp4",
+    ) -> Dict[str, Any]:
         """
         下载YouTube视频
         :param url: YouTube视频URL
@@ -123,10 +132,9 @@ class YouTubeDownloader:
         os.makedirs(target_dir, exist_ok=True)
 
         # 配置下载选项
+        download_options = media_options(download_type, output_format)
         ydl_opts = {
-            'format': self._get_format_selector(quality),
-            'outtmpl': os.path.join(target_dir, '%(title)s.%(ext)s'),
-            'merge_output_format': 'mp4',
+            'outtmpl': output_template(target_dir),
             'quiet': False,
             'no_warnings': False,
             'continuedl': True,
@@ -134,8 +142,11 @@ class YouTubeDownloader:
             'retries': 3,
             'fragment_retries': 3,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)] if progress_callback else [],
+            **download_options,
             **self._runtime_options(),
         }
+        if download_type == "video":
+            ydl_opts['format'] = self._get_format_selector(quality)
 
         try:
             logger.info(f"开始下载YouTube视频: {url}")
@@ -143,30 +154,14 @@ class YouTubeDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
 
-                # 获取下载的文件信息
-                downloaded_files = []
-
-                # 主视频文件
-                if 'requested_downloads' in info:
-                    for download_info in info['requested_downloads']:
-                        downloaded_files.append({
-                            "type": "video",
-                            "path": download_info.get('filepath', ''),
-                            "size": download_info.get('filesize', 0),
-                            "format": download_info.get('format', ''),
-                            "ext": download_info.get('ext', ''),
-                            "fps": download_info.get('fps', 0),
-                            "resolution": f"{download_info.get('width', 0)}x{download_info.get('height', 0)}"
-                        })
-
-                # 缩略图
-                thumbnail_path = os.path.join(target_dir, f"{info.get('title', 'video')}_thumbnail.jpg")
-                if info.get('thumbnail'):
-                    downloaded_files.append({
-                        "type": "thumbnail",
-                        "path": thumbnail_path,
-                        "url": info.get('thumbnail', '')
-                    })
+                downloaded_files = collect_media_files(
+                    target_dir,
+                    info,
+                    download_type,
+                    output_format,
+                )
+                if not downloaded_files:
+                    raise RuntimeError("yt-dlp completed without producing the requested output file")
 
                 logger.info(f"YouTube视频下载完成: {info.get('title', 'unknown')}")
 

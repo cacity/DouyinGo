@@ -53,7 +53,7 @@ def download_root() -> Path:
 
 
 def config_path() -> Path:
-    return data_root() / "config.json"
+    return data_root() / "sidecar-config.json"
 
 
 def models_dir() -> Path:

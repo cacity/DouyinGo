@@ -121,7 +121,8 @@ def collect_tool_status() -> list[ToolInfo]:
     deno_path = find_deno()
     yt_dlp_version = _package_version("yt-dlp")
     yt_dlp_ejs_version = _package_version("yt-dlp-ejs")
-    model_path = models_dir()
+    configured_model_path = os.getenv("DOUYINGO_MODELS_DIR")
+    model_path = Path(configured_model_path).expanduser() if configured_model_path else models_dir()
 
     return [
         ToolInfo(
@@ -142,6 +143,7 @@ def collect_tool_status() -> list[ToolInfo]:
             available=ffprobe_path is not None,
             path=ffprobe_path,
             version=_first_line([ffprobe_path, "-version"]) if ffprobe_path else None,
+            details={"bundled": _is_bundled(ffprobe_path)},
         ),
         ToolInfo(
             name="yt-dlp",
@@ -164,8 +166,7 @@ def collect_tool_status() -> list[ToolInfo]:
         ),
         ToolInfo(
             name="models-dir",
-            available=model_path.exists() or bool(os.getenv("DOUYINGO_MODELS_DIR")),
-            path=os.getenv("DOUYINGO_MODELS_DIR")
-            or str(model_path),
+            available=model_path.exists(),
+            path=str(model_path),
         ),
     ]

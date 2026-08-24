@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -12,7 +12,9 @@ from core.pure_python_extractor import PurePythonExtractor
 from core.twitter_downloader import TwitterDownloader
 from core.youtube_downloader import YouTubeDownloader
 
+from backend.ai_models import get_model_runner, run_ai_postprocess
 from backend.ffmpeg_tools import find_deno, find_ffmpeg
+from backend.media_postprocess import append_metadata_file, transform_downloaded_media
 from backend.schemas import (
     DownloadJob,
     DownloadOptions,
@@ -22,6 +24,7 @@ from backend.schemas import (
     Platform,
 )
 from backend.url_utils import default_output_dir, extract_url
+from core.ytdlp_media import normalize_media_format
 
 
 QUALITY_ALIASES = {
@@ -48,6 +51,9 @@ class DownloadService:
         platform = request.platform or resolved.platform
         if platform == Platform.UNKNOWN or not resolved.supported:
             raise ValueError("Unsupported or unrecognized video URL")
+        normalize_media_format(request.options.download_type, request.options.format)
+        if request.options.ai_model_id:
+            get_model_runner(request.options.ai_model_id)
 
         output_dir = request.options.output_dir or default_output_dir(platform)
         output_path = Path(output_dir)
@@ -55,7 +61,7 @@ class DownloadService:
             output_path = self.project_root / output_path
         output_path.mkdir(parents=True, exist_ok=True)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         job = DownloadJob(
             id=uuid.uuid4().hex,
             url=resolved.url,
@@ -93,7 +99,7 @@ class DownloadService:
             if job.status in {JobStatus.QUEUED, JobStatus.RESOLVING}:
                 job.status = JobStatus.CANCELLED
                 job.message = "Cancelled before download started"
-                job.updated_at = datetime.utcnow()
+                job.updated_at = datetime.now(timezone.utc)
             return job
 
     def resolve_info(self, text: str, platform: Platform | None = None) -> dict[str, Any]:
@@ -133,6 +139,8 @@ class DownloadService:
                 self._update_job(job_id, status=JobStatus.CANCELLED, message="Cancelled")
                 return
 
+            job = self.get_job(job_id) or job
+
             self._update_job(job_id, status=JobStatus.DOWNLOADING, progress=8, message="Starting download")
 
             def progress_callback(progress: int, message: str):
@@ -147,6 +155,22 @@ class DownloadService:
 
             result = self._download_with_platform_downloader(downloader, job, progress_callback)
             if result.get("success"):
+                if job.platform in {Platform.DOUYIN, Platform.KOUSHARE}:
+                    result = transform_downloaded_media(
+                        result,
+                        job,
+                        find_ffmpeg(),
+                        progress_callback,
+                    )
+                if job.options.save_metadata:
+                    result = append_metadata_file(result, job)
+                if job.options.ai_model_id:
+                    result = run_ai_postprocess(
+                        job.options.ai_model_id,
+                        job,
+                        result,
+                        progress_callback,
+                    )
                 files = [_normalize_downloaded_file(item) for item in result.get("downloaded_files", [])]
                 title = result.get("title") or job.title
                 self._update_job(
@@ -182,7 +206,7 @@ class DownloadService:
                 deno_path=find_deno(),
             )
         if platform == Platform.TWITTER:
-            return TwitterDownloader(output_dir)
+            return TwitterDownloader(output_dir, ffmpeg_path=find_ffmpeg())
         if platform == Platform.KOUSHARE:
             return KoushareDownloader(output_dir)
         raise ValueError(f"Unsupported platform: {platform}")
@@ -196,6 +220,15 @@ class DownloadService:
         quality = _normalize_quality(job.platform, job.options.quality)
         if job.platform == Platform.DOUYIN:
             return downloader.download_video(job.url, job.output_dir, progress_callback)
+        if job.platform in {Platform.YOUTUBE, Platform.TWITTER}:
+            return downloader.download_video(
+                job.url,
+                download_dir=job.output_dir,
+                quality=quality,
+                progress_callback=progress_callback,
+                download_type=job.options.download_type,
+                output_format=job.options.format,
+            )
         return downloader.download_video(
             job.url,
             download_dir=job.output_dir,
@@ -210,7 +243,7 @@ class DownloadService:
                 return None
             data = job.model_dump()
             data.update(changes)
-            data["updated_at"] = datetime.utcnow()
+            data["updated_at"] = datetime.now(timezone.utc)
             updated = DownloadJob.model_validate(data)
             self._jobs[job_id] = updated
             return updated

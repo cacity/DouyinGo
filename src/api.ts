@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { AIModelInfo, DownloadJob, Platform, ToolInfo } from "./types";
+import type { AIModelInfo, DownloadJob, Platform, SidecarConfig, ToolInfo } from "./types";
 
 export async function ensureBackend(): Promise<string> {
   const configured = import.meta.env.VITE_DOUYINGO_BACKEND_URL;
@@ -62,6 +62,7 @@ export function createDownload(
       download_type: "video" | "audio" | "cover";
       save_metadata: boolean;
       ai_model_id?: string | null;
+      output_dir?: string | null;
     };
   }
 ) {
@@ -83,6 +84,17 @@ export function getTools(baseUrl: string) {
 
 export function getModels(baseUrl: string) {
   return apiFetch<AIModelInfo[]>(baseUrl, "/api/models");
+}
+
+export function getConfig(baseUrl: string) {
+  return apiFetch<SidecarConfig>(baseUrl, "/api/config");
+}
+
+export function updateConfig(baseUrl: string, config: SidecarConfig) {
+  return apiFetch<SidecarConfig>(baseUrl, "/api/config", {
+    method: "PUT",
+    body: JSON.stringify(config)
+  });
 }
 
 export async function revealPath(path: string): Promise<void> {

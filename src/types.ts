@@ -17,6 +17,12 @@ export interface DownloadOptions {
   ai_model_id?: string | null;
 }
 
+export interface SidecarConfig {
+  output_dir?: string | null;
+  save_metadata: boolean;
+  ai_model_id?: string | null;
+}
+
 export interface DownloadedFile {
   type: string;
   path: string;

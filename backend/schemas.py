@@ -39,6 +39,12 @@ class DownloadRequest(BaseModel):
     options: DownloadOptions = Field(default_factory=DownloadOptions)
 
 
+class SidecarConfig(BaseModel):
+    output_dir: str | None = None
+    save_metadata: bool = False
+    ai_model_id: str | None = None
+
+
 class ResolveRequest(BaseModel):
     text: str
     platform: Platform | None = None

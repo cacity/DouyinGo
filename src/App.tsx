@@ -15,19 +15,23 @@ import {
   Music2,
   PlaySquare,
   RefreshCw,
+  Save,
   Settings,
   Trash2,
-  Wrench
+  Wrench,
+  X
 } from "lucide-react";
 import {
   cancelDownload,
   createDownload,
   ensureBackend,
+  getConfig,
   getDownloads,
   getHealth,
   getModels,
   getTools,
-  revealPath
+  revealPath,
+  updateConfig
 } from "./api";
 import type { AIModelInfo, DownloadJob, JobStatus, Platform, ToolInfo } from "./types";
 
@@ -55,6 +59,12 @@ const statusLabels: Record<JobStatus, string> = {
   cancelled: "已取消"
 };
 
+const formatOptions = {
+  video: ["MP4", "MKV", "MOV"],
+  audio: ["MP3", "M4A", "WAV"],
+  cover: ["JPG"]
+} as const;
+
 function App() {
   const [backendUrl, setBackendUrl] = useState("http://127.0.0.1:8765");
   const [backendState, setBackendState] = useState<"starting" | "online" | "offline">("starting");
@@ -68,6 +78,11 @@ function App() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [models, setModels] = useState<AIModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [saveMetadata, setSaveMetadata] = useState(false);
+  const [outputDir, setOutputDir] = useState("");
+  const [draftSaveMetadata, setDraftSaveMetadata] = useState(false);
+  const [draftOutputDir, setDraftOutputDir] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string>("");
 
   const activeJobs = useMemo(
@@ -100,6 +115,10 @@ function App() {
     try {
       const url = await ensureBackend();
       setBackendUrl(url);
+      const config = await getConfig(url);
+      setSaveMetadata(config.save_metadata);
+      setOutputDir(config.output_dir || "");
+      setSelectedModel(config.ai_model_id || "");
       await refresh(url);
     } catch (err) {
       setBackendState("offline");
@@ -130,6 +149,10 @@ function App() {
     setQuality(options[0]);
   }, [platform]);
 
+  useEffect(() => {
+    setFormat(formatOptions[downloadType][0]);
+  }, [downloadType]);
+
   async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText();
@@ -154,8 +177,9 @@ function App() {
           quality,
           format,
           download_type: downloadType,
-          save_metadata: false,
-          ai_model_id: selectedModel || null
+          save_metadata: saveMetadata,
+          ai_model_id: selectedModel || null,
+          output_dir: outputDir.trim() || null
         }
       });
       setInput("");
@@ -163,6 +187,28 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  async function saveSettings() {
+    try {
+      await updateConfig(backendUrl, {
+        output_dir: draftOutputDir.trim() || null,
+        save_metadata: draftSaveMetadata,
+        ai_model_id: selectedModel || null
+      });
+      setOutputDir(draftOutputDir.trim());
+      setSaveMetadata(draftSaveMetadata);
+      setSettingsOpen(false);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function openSettings() {
+    setDraftOutputDir(outputDir);
+    setDraftSaveMetadata(saveMetadata);
+    setSettingsOpen(true);
   }
 
   async function cancel(jobId: string) {
@@ -198,10 +244,10 @@ function App() {
             );
           })}
         </nav>
-        <div className="sidebarFooter">
+        <button className="sidebarFooter" type="button" onClick={openSettings} title="设置">
           <Settings size={16} />
-          <span>v2.0.0</span>
-        </div>
+          <span>v2.0.1</span>
+        </button>
       </aside>
 
       <section className="workspace">
@@ -220,7 +266,11 @@ function App() {
               <option value="audio">音频</option>
               <option value="cover">封面</option>
             </select>
-            <select value={quality} onChange={(event) => setQuality(event.target.value)}>
+            <select
+              value={quality}
+              onChange={(event) => setQuality(event.target.value)}
+              disabled={downloadType !== "video"}
+            >
               {qualityOptions[platform].map((option) => (
                 <option key={option} value={option}>
                   {option}
@@ -228,9 +278,11 @@ function App() {
               ))}
             </select>
             <select value={format} onChange={(event) => setFormat(event.target.value)}>
-              <option value="MP4">MP4</option>
-              <option value="MKV">MKV</option>
-              <option value="MOV">MOV</option>
+              {formatOptions[downloadType].map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
             <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
               <option value="">AI: 无</option>
@@ -319,6 +371,46 @@ function App() {
           </aside>
         </div>
       </section>
+      {settingsOpen ? (
+        <div className="modalBackdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
+          <section
+            className="settingsDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="settingsHeader">
+              <h2 id="settings-title">设置</h2>
+              <button className="iconButton" type="button" onClick={() => setSettingsOpen(false)} title="关闭">
+                <X size={18} />
+              </button>
+            </div>
+            <label className="settingsField">
+              <span>下载目录</span>
+              <input
+                value={draftOutputDir}
+                onChange={(event) => setDraftOutputDir(event.target.value)}
+                placeholder="使用默认下载目录"
+              />
+            </label>
+            <label className="checkboxField">
+              <input
+                type="checkbox"
+                checked={draftSaveMetadata}
+                onChange={(event) => setDraftSaveMetadata(event.target.checked)}
+              />
+              <span>保存元数据</span>
+            </label>
+            <div className="settingsActions">
+              <button className="primaryButton" type="button" onClick={() => void saveSettings()}>
+                <Save size={17} />
+                <span>保存</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -347,7 +439,9 @@ function TaskRow({
         </div>
         <div className="taskMeta">
           <span>{job.platform}</span>
-          <span>{job.options.quality}</span>
+          {job.options.download_type === "video" ? <span>{job.options.quality}</span> : null}
+          <span>{job.options.download_type}</span>
+          <span>{job.options.format}</span>
           <span>{job.output_dir}</span>
         </div>
         <div className="progressTrack">

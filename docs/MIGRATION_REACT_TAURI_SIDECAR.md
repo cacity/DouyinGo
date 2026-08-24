@@ -24,6 +24,7 @@ React/Vite UI
 
 - `GET /health`
 - `GET /api/config`
+- `PUT /api/config`
 - `GET /api/tools`
 - `GET /api/models`
 - `POST /api/resolve`
@@ -32,7 +33,45 @@ React/Vite UI
 - `GET /api/downloads/{job_id}`
 - `POST /api/downloads/{job_id}/cancel`
 
-The current API stores jobs in memory. A later merge-ready iteration should persist task history to SQLite if task history must survive app restarts.
+The current API stores jobs in memory. User defaults are persisted separately in
+`sidecar-config.json`; the legacy PyQt `config.json` is not overwritten.
+
+## Media Contract
+
+- Video: `MP4`, `MKV`, or `MOV`.
+- Audio: `MP3`, `M4A`, or `WAV`.
+- Cover: `JPG`.
+- YouTube and Twitter/X use native yt-dlp media and post-processing options.
+- Douyin and Koushare download their native media first, then use the bundled
+  FFmpeg for audio extraction, cover extraction, or container remuxing.
+- `save_metadata` writes a stable UTF-8 JSON sidecar with the source URL,
+  selected options, downloaded files, and sanitized platform metadata.
+
+Unsupported type/format pairs and unavailable AI runners are rejected before a
+job is queued. Successful jobs only report final files that exist on disk.
+
+## AI Model Runners
+
+Raw `.gguf`, `.onnx`, `.safetensors`, `.pt`, `.pth`, and `.bin` files are model
+artifacts, not executable integrations. They remain visible as disabled until a
+runner manifest named `douyingo-model.json` is placed beside the model:
+
+```json
+{
+  "id": "local-captioner",
+  "name": "Local captioner",
+  "provider": "command",
+  "capabilities": ["postprocess"],
+  "command": ["runner.exe", "--input", "{input}", "--output", "{output_dir}"],
+  "timeout_seconds": 3600
+}
+```
+
+The runner receives a versioned job JSON document on standard input. Supported
+command placeholders are `{input}`, `{output_dir}`, `{metadata}`, and
+`{model_dir}`. It may print a JSON object with a `downloaded_files` array; every
+reported path must exist inside the task output directory. Commands are launched
+directly without a shell.
 
 ## Development
 
@@ -131,6 +170,6 @@ Before merging this branch back to `main`, verify:
 
 - Add persistent job history.
 - Add explicit per-platform cookies/proxy settings for yt-dlp.
-- Implement real AI post-processing once the model type is chosen.
+- Ship and validate a concrete model runner for the model family selected by the product owner.
 - Add front-end integration tests after the UI stabilizes.
 - Replace direct stdout logs with structured sidecar events if fine-grained progress streaming is needed.

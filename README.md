@@ -2,14 +2,14 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.7+-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 
 **多平台视频下载工具 | Multi-Platform Video Downloader**
 
-基于 PyQt5 的多平台视频下载工具，支持抖音、YouTube、Twitter/X、寇享（Koushare）视频下载
+基于 React/Tauri 桌面界面与 Python sidecar 的多平台媒体下载工具，支持抖音、YouTube、Twitter/X、寇享（Koushare）。
 
 [功能特性](#-功能特性) • [安装使用](#-安装使用) • [使用说明](#-使用说明) • [项目结构](#-项目结构)
 
@@ -26,7 +26,7 @@
 
 ### 📺 YouTube下载
 - **🎬 高质量下载** - 支持4K、1080p等多种画质
-- **🎞️ 多格式支持** - MP4、AVI、MKV、MOV等格式
+- **🎞️ 多格式支持** - MP4、MKV、MOV 视频，MP3、M4A、WAV 音频及 JPG 封面
 - **🎞️ Shorts支持** - 支持YouTube Shorts短视频
 - **📊 详细信息** - 自动获取标题、时长、缩略图
 
@@ -46,9 +46,11 @@
 - **🖼️ 视频预览** - 自动生成视频缩略图
 - **📁 批量下载** - 支持多个视频同时下载
 - **💻 现代 UI** - 简洁美观的图形界面
-- **🚀 纯 Python 实现** - 无需外部服务，开箱即用
+- **🚀 本地 sidecar** - 下载与媒体处理均在本机 Python sidecar 中完成
 
-## 📸 界面预览
+## 📸 旧 PyQt 界面对照
+
+以下截图仅用于迁移前后对照；当前桌面界面位于 `src/`。
 
 ![](https://raw.githubusercontent.com/cacityfauh-ui/MyPic/master/pic/20251118143806888.png)
 
@@ -60,7 +62,8 @@
 
 ## 🛠️ 技术栈
 
-- **GUI 框架**: PyQt5
+- **桌面界面**: React 19 + Vite + Tauri 2
+- **本地后端**: FastAPI + Python sidecar
 - **下载引擎**: yt-dlp + 平台定制下载器
 - **HTTP 请求**: requests + httpx
 - **视频处理**: ffmpeg (用于缩略图提取)
@@ -71,7 +74,8 @@
 
 ### 环境要求
 
-- Python 3.7 或更高版本
+- Python 3.10 或更高版本
+- Node.js 与 Rust（仅源码开发和打包需要）
 - Windows / macOS / Linux
 - FFmpeg (用于视频处理)
 
@@ -98,11 +102,20 @@ pip install -r requirements.txt
 - **macOS**: `brew install ffmpeg`
 - **Linux**: `sudo apt-get install ffmpeg`
 
-4. **运行程序**
+4. **安装前端依赖**
 
 ```bash
-python main.py
+npm install
 ```
+
+5. **运行桌面开发版**
+
+```bash
+npm run package:sidecar
+npm run tauri:dev
+```
+
+旧 PyQt 入口 `python main.py` 暂时保留用于迁移对照，不是新桌面版入口。
 
 ## 📖 使用说明
 
@@ -149,7 +162,7 @@ python main.py
 
 #### YouTube平台
 - 多画质选择（4K/1080p/720p等）
-- 多格式支持（MP4/AVI/MKV/MOV）
+- 多格式支持（MP4/MKV/MOV；音频 MP3/M4A/WAV；封面 JPG）
 - 自动获取视频信息和缩略图
 - 支持YouTube Shorts
 
@@ -168,7 +181,11 @@ python main.py
 
 ```
 douyin_app/
-├── main.py                      # 主程序入口
+├── main.py                      # 旧 PyQt 对照入口
+├── src/                         # React 桌面界面
+├── src-tauri/                   # Tauri 外壳与 sidecar 生命周期
+├── backend/                     # FastAPI sidecar API 与任务服务
+├── scripts/build_sidecar.py     # PyInstaller sidecar 打包
 ├── requirements.txt             # 依赖包列表
 ├── README.md                   # 项目说明文档
 ├── test_core_functions.py      # 核心功能测试
@@ -200,14 +217,15 @@ douyin_app/
 
 ### 核心架构
 - **下载引擎**: yt-dlp + 平台定制下载器
-- **GUI框架**: PyQt5 (跨平台桌面应用)
+- **桌面外壳**: React/Tauri
+- **后端边界**: FastAPI Python sidecar
 - **网络请求**: requests + httpx
 - **视频处理**: FFmpeg
 - **日志系统**: loguru
 
 ### 关键特性
 1. **模块化设计**: 每个平台独立的下载模块
-2. **异步下载**: QThread实现多任务并发
+2. **异步下载**: sidecar 线程池实现多任务并发
 3. **智能解析**: 自动识别和提取视频链接
 4. **进度监控**: 实时显示下载进度和状态
 5. **错误处理**: 完善的异常处理和用户提示
@@ -216,7 +234,7 @@ douyin_app/
 1. **URL识别**: 正则表达式匹配平台URL
 2. **信息获取**: 调用平台解析逻辑获取视频元信息
 3. **参数配置**: 根据用户选择配置下载参数
-4. **异步下载**: QThread工作线程执行下载
+4. **异步下载**: sidecar 工作线程执行下载，React 轮询任务状态
 5. **结果处理**: 更新界面和文件信息
 
 ## ⚙️ 配置说明
@@ -229,7 +247,7 @@ douyin_app/
 - `twitter_downloads/`
 - `koushare_downloads/`
 
-可以在设置中修改下载路径。
+可以在桌面版设置中修改下载路径，并选择是否保存元数据。配置写入应用数据目录的 `sidecar-config.json`。
 
 ### 文件命名规则
 
@@ -252,7 +270,13 @@ python test_core_functions.py
 
 ## 📝 更新日志
 
-### v2.0.0 (当前版本)
+### v2.0.1 (当前版本)
+- 🐛 修复打包版 YouTube 403，并捆绑 Deno、yt-dlp-ejs、FFmpeg 与 ffprobe
+- 🎵 下载类型与格式真实生效，新增音频、封面和元数据输出
+- 🤖 新增可验证的本地 AI 模型运行器清单
+- ⚙️ 新增 sidecar 设置持久化与响应式桌面布局修复
+
+### v2.0.0
 - ✨ 新增YouTube视频下载支持
 - ✨ 新增Twitter/X视频下载支持
 - ✨ 新增寇享（Koushare）视频下载支持
@@ -314,7 +338,8 @@ python test_core_functions.py
 
 ## 🙏 致谢
 
-- [PyQt5](https://www.riverbankcomputing.com/software/pyqt/) - GUI 框架
+- [Tauri](https://tauri.app/) - 桌面应用外壳
+- [React](https://react.dev/) - 桌面界面
 - [requests](https://requests.readthedocs.io/) - HTTP 库
 - [ffmpeg](https://ffmpeg.org/) - 视频处理工具
 
