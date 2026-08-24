@@ -4,15 +4,15 @@ import hashlib
 import os
 from pathlib import Path
 
+from backend.runtime_paths import models_dir
 from backend.schemas import AIModelInfo
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_EXTENSIONS = {".gguf", ".onnx", ".safetensors", ".pt", ".pth", ".bin"}
 
 
 def model_search_dirs() -> list[Path]:
-    dirs = [PROJECT_ROOT / "models"]
+    dirs = [models_dir()]
     env_dir = os.getenv("DOUYINGO_MODELS_DIR")
     if env_dir:
         dirs.insert(0, Path(env_dir))

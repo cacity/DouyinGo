@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,11 +10,11 @@ from backend import __version__
 from backend.ai_models import configured_model_status
 from backend.download_service import DownloadService
 from backend.ffmpeg_tools import collect_tool_status
+from backend.runtime_paths import config_path, download_root
 from backend.schemas import DownloadJob, DownloadRequest, HealthResponse, ResolveRequest, ToolInfo
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-download_service = DownloadService(PROJECT_ROOT)
+download_service = DownloadService(download_root())
 
 app = FastAPI(title="DouyinGo Sidecar", version=__version__)
 app.add_middleware(
@@ -39,10 +38,10 @@ def health() -> HealthResponse:
 
 @app.get("/api/config")
 def get_config() -> dict:
-    config_path = PROJECT_ROOT / "config.json"
-    if not config_path.exists():
+    path = config_path()
+    if not path.exists():
         return {}
-    return json.loads(config_path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @app.get("/api/tools", response_model=list[ToolInfo])
@@ -67,7 +66,7 @@ def resolve_media(request: ResolveRequest) -> dict:
 def create_download(request: DownloadRequest) -> DownloadJob:
     try:
         return download_service.create_download(request)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

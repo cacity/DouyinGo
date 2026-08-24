@@ -12,6 +12,7 @@ from core.pure_python_extractor import PurePythonExtractor
 from core.twitter_downloader import TwitterDownloader
 from core.youtube_downloader import YouTubeDownloader
 
+from backend.ffmpeg_tools import find_deno, find_ffmpeg
 from backend.schemas import (
     DownloadJob,
     DownloadOptions,
@@ -175,7 +176,11 @@ class DownloadService:
         if platform == Platform.DOUYIN:
             return PurePythonExtractor()
         if platform == Platform.YOUTUBE:
-            return YouTubeDownloader(output_dir)
+            return YouTubeDownloader(
+                output_dir,
+                ffmpeg_path=find_ffmpeg(),
+                deno_path=find_deno(),
+            )
         if platform == Platform.TWITTER:
             return TwitterDownloader(output_dir)
         if platform == Platform.KOUSHARE:

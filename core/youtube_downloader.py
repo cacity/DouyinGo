@@ -26,12 +26,19 @@ except ImportError:
 class YouTubeDownloader:
     """YouTube视频下载器"""
 
-    def __init__(self, download_dir: str = "youtube_downloads"):
+    def __init__(
+        self,
+        download_dir: str = "youtube_downloads",
+        ffmpeg_path: Optional[str] = None,
+        deno_path: Optional[str] = None,
+    ):
         """
         初始化下载器
         :param download_dir: 下载目录
         """
         self.download_dir = download_dir
+        self.ffmpeg_path = ffmpeg_path
+        self.deno_path = deno_path
         os.makedirs(download_dir, exist_ok=True)
         self._last_progress = -1  # 记录上次报告的进度
 
@@ -68,6 +75,7 @@ class YouTubeDownloader:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            **self._runtime_options(),
         }
 
         try:
@@ -118,11 +126,15 @@ class YouTubeDownloader:
         ydl_opts = {
             'format': self._get_format_selector(quality),
             'outtmpl': os.path.join(target_dir, '%(title)s.%(ext)s'),
+            'merge_output_format': 'mp4',
             'quiet': False,
             'no_warnings': False,
             'continuedl': True,
             'noprogress': False,
+            'retries': 3,
+            'fragment_retries': 3,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)] if progress_callback else [],
+            **self._runtime_options(),
         }
 
         try:
@@ -183,17 +195,32 @@ class YouTubeDownloader:
         :return: yt-dlp格式选择器
         """
         quality_map = {
-            "best": "best[ext=mp4]/best",
+            "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best",
             "worst": "worst[ext=mp4]/worst",
-            "4k": "best[height<=2160][ext=mp4]/best[height<=2160]/best",
-            "1440p": "best[height<=1440][ext=mp4]/best[height<=1440]/best",
-            "1080p": "best[height<=1080][ext=mp4]/best[height<=1080]/best",
-            "720p": "best[height<=720][ext=mp4]/best[height<=720]/best",
-            "480p": "best[height<=480][ext=mp4]/best[height<=480]/best",
-            "360p": "best[height<=360][ext=mp4]/best[height<=360]/best",
+            "4k": self._bounded_format_selector(2160),
+            "1440p": self._bounded_format_selector(1440),
+            "1080p": self._bounded_format_selector(1080),
+            "720p": self._bounded_format_selector(720),
+            "480p": self._bounded_format_selector(480),
+            "360p": self._bounded_format_selector(360),
         }
 
-        return quality_map.get(quality, "best[ext=mp4]/best")
+        return quality_map.get(quality, quality_map["best"])
+
+    def _bounded_format_selector(self, height: int) -> str:
+        limit = f"[height<={height}]"
+        return (
+            f"bestvideo{limit}[ext=mp4]+bestaudio[ext=m4a]/"
+            f"best{limit}[ext=mp4]/bestvideo{limit}+bestaudio/best{limit}"
+        )
+
+    def _runtime_options(self) -> Dict[str, Any]:
+        options: Dict[str, Any] = {}
+        if self.ffmpeg_path:
+            options['ffmpeg_location'] = self.ffmpeg_path
+        if self.deno_path:
+            options['js_runtimes'] = {'deno': {'path': self.deno_path}}
+        return options
 
     def _progress_hook(self, d: Dict[str, Any], callback: Optional[Callable] = None):
         """

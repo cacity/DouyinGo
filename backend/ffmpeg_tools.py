@@ -8,10 +8,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+from backend.runtime_paths import SOURCE_ROOT, models_dir
 from backend.schemas import ToolInfo
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = SOURCE_ROOT
+
+
+def _bundled_executable(name: str) -> str | None:
+    pyinstaller_dir = getattr(sys, "_MEIPASS", None)
+    if pyinstaller_dir:
+        candidate = Path(pyinstaller_dir) / name
+        if candidate.exists():
+            return str(candidate)
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidate = executable_dir / name
+    if candidate.exists():
+        return str(candidate)
+    return None
 
 
 def find_ffmpeg() -> str | None:
@@ -19,16 +34,9 @@ def find_ffmpeg() -> str | None:
     if configured and Path(configured).exists():
         return configured
 
-    pyinstaller_dir = getattr(sys, "_MEIPASS", None)
-    if pyinstaller_dir:
-        bundled_ffmpeg = Path(pyinstaller_dir) / "ffmpeg.exe"
-        if bundled_ffmpeg.exists():
-            return str(bundled_ffmpeg)
-
-    executable_dir = Path(sys.executable).resolve().parent
-    adjacent_ffmpeg = executable_dir / "ffmpeg.exe"
-    if adjacent_ffmpeg.exists():
-        return str(adjacent_ffmpeg)
+    bundled_ffmpeg = _bundled_executable("ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg")
+    if bundled_ffmpeg:
+        return bundled_ffmpeg
 
     local_windows_ffmpeg = PROJECT_ROOT / "ffmpeg.exe"
     if platform.system() == "Windows" and local_windows_ffmpeg.exists():
@@ -41,21 +49,31 @@ def find_ffprobe() -> str | None:
     if configured and Path(configured).exists():
         return configured
 
-    pyinstaller_dir = getattr(sys, "_MEIPASS", None)
-    if pyinstaller_dir:
-        bundled_ffprobe = Path(pyinstaller_dir) / "ffprobe.exe"
-        if bundled_ffprobe.exists():
-            return str(bundled_ffprobe)
-
-    executable_dir = Path(sys.executable).resolve().parent
-    adjacent_ffprobe = executable_dir / "ffprobe.exe"
-    if adjacent_ffprobe.exists():
-        return str(adjacent_ffprobe)
+    bundled_ffprobe = _bundled_executable("ffprobe.exe" if platform.system() == "Windows" else "ffprobe")
+    if bundled_ffprobe:
+        return bundled_ffprobe
 
     local_windows_ffprobe = PROJECT_ROOT / "ffprobe.exe"
     if platform.system() == "Windows" and local_windows_ffprobe.exists():
         return str(local_windows_ffprobe)
     return shutil.which("ffprobe")
+
+
+def find_deno() -> str | None:
+    configured = os.getenv("DOUYINGO_DENO_PATH")
+    if configured and Path(configured).exists():
+        return configured
+
+    executable_name = "deno.exe" if platform.system() == "Windows" else "deno"
+    bundled_deno = _bundled_executable(executable_name)
+    if bundled_deno:
+        return bundled_deno
+    return shutil.which("deno")
+
+
+def _is_bundled(path: str | None) -> bool:
+    pyinstaller_dir = getattr(sys, "_MEIPASS", None)
+    return bool(path and pyinstaller_dir and Path(path).parent == Path(pyinstaller_dir))
 
 
 def _first_line(command: list[str], timeout: int = 5) -> str | None:
@@ -87,13 +105,23 @@ def _package_version(package_name: str) -> str | None:
                 return yt_dlp.version.__version__
             except Exception:
                 return None
+        if package_name == "yt-dlp-ejs":
+            try:
+                import yt_dlp_ejs
+
+                return yt_dlp_ejs.version
+            except Exception:
+                return None
         return None
 
 
 def collect_tool_status() -> list[ToolInfo]:
     ffmpeg_path = find_ffmpeg()
     ffprobe_path = find_ffprobe()
+    deno_path = find_deno()
     yt_dlp_version = _package_version("yt-dlp")
+    yt_dlp_ejs_version = _package_version("yt-dlp-ejs")
+    model_path = models_dir()
 
     return [
         ToolInfo(
@@ -107,7 +135,7 @@ def collect_tool_status() -> list[ToolInfo]:
             available=ffmpeg_path is not None,
             path=ffmpeg_path,
             version=_first_line([ffmpeg_path, "-version"]) if ffmpeg_path else None,
-            details={"bundled": bool(ffmpeg_path and Path(ffmpeg_path).parent == PROJECT_ROOT)},
+            details={"bundled": _is_bundled(ffmpeg_path)},
         ),
         ToolInfo(
             name="ffprobe",
@@ -122,10 +150,22 @@ def collect_tool_status() -> list[ToolInfo]:
             version=yt_dlp_version,
         ),
         ToolInfo(
+            name="yt-dlp-ejs",
+            available=yt_dlp_ejs_version is not None,
+            path=None,
+            version=yt_dlp_ejs_version,
+        ),
+        ToolInfo(
+            name="deno",
+            available=deno_path is not None,
+            path=deno_path,
+            version=_first_line([deno_path, "--version"]) if deno_path else None,
+            details={"bundled": _is_bundled(deno_path)},
+        ),
+        ToolInfo(
             name="models-dir",
-            available=(PROJECT_ROOT / "models").exists()
-            or bool(os.getenv("DOUYINGO_MODELS_DIR")),
+            available=model_path.exists() or bool(os.getenv("DOUYINGO_MODELS_DIR")),
             path=os.getenv("DOUYINGO_MODELS_DIR")
-            or str(PROJECT_ROOT / "models"),
+            or str(model_path),
         ),
     ]

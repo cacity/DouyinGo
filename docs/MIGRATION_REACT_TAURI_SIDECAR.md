@@ -80,11 +80,17 @@ Build the Python sidecar for the current Rust target:
 npm.cmd run package:sidecar
 ```
 
-This runs PyInstaller, embeds `ffmpeg.exe` when present, and copies the output to:
+This runs PyInstaller, embeds `ffmpeg.exe`/`ffprobe.exe` when present, bundles the
+official Deno runtime plus the matching `yt-dlp-ejs` challenge solver, and copies
+the output to:
 
 ```text
 src-tauri/binaries/douyingo-sidecar-<target-triple>.exe
 ```
+
+The build guard requires `yt-dlp 2026.08.19` or newer. This avoids packaging the
+known-broken July 2026 YouTube client behavior that can return HTTP 403 for media
+URLs even when metadata extraction succeeds.
 
 Then build the desktop app:
 
@@ -98,12 +104,22 @@ Tauri requires `externalBin` sidecars to use a target-triple suffix. The target 
 rustc -vV
 ```
 
+Packaged downloads prefer `~/Downloads/DouyinGo/<platform>_downloads`. If the
+Downloads folder is not writable, the sidecar falls back to the application-data
+folder under `DouyinGo/downloads`. Sandboxed environments that deny both locations
+use the stable `%TEMP%/DouyinGo/downloads` folder as a last resort; the random
+PyInstaller `_MEI` extraction directory is never used for user output.
+Configuration and local model discovery use the platform application-data folder.
+Development runs retain the project-relative directories. These locations can be
+overridden with `DOUYINGO_DOWNLOADS_DIR`, `DOUYINGO_DATA_DIR`, and
+`DOUYINGO_MODELS_DIR`.
+
 ## Migration Gates
 
 Before merging this branch back to `main`, verify:
 
 1. Python compile and smoke tests pass.
-2. Sidecar health, tool inventory, and invalid-request API tests pass.
+2. Sidecar health, tool inventory (including Deno and `yt-dlp-ejs`), and invalid-request API tests pass.
 3. React build passes after `npm.cmd install`.
 4. `npm.cmd run package:sidecar` produces the suffixed binary under `src-tauri/binaries/`.
 5. `npm.cmd run tauri:dev` starts the UI and can connect to the sidecar.

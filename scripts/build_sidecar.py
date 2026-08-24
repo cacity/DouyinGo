@@ -13,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BINARIES_DIR = PROJECT_ROOT / "src-tauri" / "binaries"
+MIN_YT_DLP_VERSION = (2026, 8, 19)
 EXCLUDED_MODULES = [
     "PyQt5",
     "PyQt6",
@@ -62,13 +63,44 @@ def host_triple() -> str:
     raise SystemExit("Could not find host triple in rustc -vV output")
 
 
+def deno_binary() -> Path:
+    try:
+        import deno
+        import yt_dlp.version
+        import yt_dlp_ejs.yt.solver  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            'YouTube packaging dependencies are missing. Run: '
+            'python -m pip install "yt-dlp[default,deno]==2026.8.19"'
+        ) from exc
+
+    installed_version = tuple(
+        int(part) for part in yt_dlp.version.__version__.split(".")[:3]
+    )
+    if installed_version < MIN_YT_DLP_VERSION:
+        raise SystemExit(
+            f"yt-dlp {yt_dlp.version.__version__} is too old for the packaged sidecar. "
+            'Run: python -m pip install --upgrade "yt-dlp[default,deno]==2026.8.19"'
+        )
+
+    path = Path(deno.find_deno_bin())
+    if not path.exists():
+        raise SystemExit(f"The deno package did not provide an executable at {path}")
+    return path
+
+
 def build_sidecar() -> Path:
     extension = ".exe" if platform.system() == "Windows" else ""
-    ffmpeg_path = PROJECT_ROOT / "ffmpeg.exe"
-    add_binary: list[str] = []
-    if ffmpeg_path.exists():
-        separator = ";" if platform.system() == "Windows" else ":"
-        add_binary = ["--add-binary", f"{ffmpeg_path}{separator}."]
+    separator = ";" if platform.system() == "Windows" else ":"
+    binary_paths = [deno_binary()]
+    for executable in ("ffmpeg", "ffprobe"):
+        local_path = PROJECT_ROOT / f"{executable}{extension}"
+        if local_path.exists():
+            binary_paths.append(local_path)
+
+    add_binaries: list[str] = []
+    for binary_path in binary_paths:
+        add_binaries.extend(["--add-binary", f"{binary_path}{separator}."])
 
     excludes: list[str] = []
     for module in EXCLUDED_MODULES:
@@ -96,8 +128,10 @@ def build_sidecar() -> Path:
             "uvicorn.protocols.websockets.auto",
             "--hidden-import",
             "uvicorn.lifespan.on",
+            "--hidden-import",
+            "yt_dlp_ejs.yt.solver",
             *excludes,
-            *add_binary,
+            *add_binaries,
             str(PROJECT_ROOT / "backend" / "sidecar.py"),
         ]
     )
