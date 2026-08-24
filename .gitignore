@@ -25,3 +25,9 @@ koushare_downloads/
 
 # Test-generated directories
 test_*_downloads/
+
+# Local sidecar state
+jobs.sqlite3
+jobs.sqlite3-shm
+jobs.sqlite3-wal
+sidecar-config.json

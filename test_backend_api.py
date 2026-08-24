@@ -15,10 +15,12 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.ai_models import discover_ai_models, run_ai_postprocess
+from backend.download_service import DownloadService
+from backend.job_store import JobStore
 from backend.media_postprocess import append_metadata_file, transform_downloaded_media
 from backend import runtime_paths
-from backend.runtime_paths import data_root, download_root
-from backend.schemas import DownloadJob, DownloadOptions, JobStatus, Platform
+from backend.runtime_paths import data_root, download_root, jobs_db_path
+from backend.schemas import DownloadJob, DownloadOptions, DownloadRequest, JobStatus, Platform
 from backend.sidecar import build_parser, process_is_running
 from backend.url_utils import extract_url
 from core.ytdlp_media import media_options, normalize_media_format
@@ -69,7 +71,8 @@ def test_api_health_and_inventory():
 
     downloads = client.get("/api/downloads")
     assert_equal(downloads.status_code, 200, "downloads status")
-    assert_equal(downloads.json(), [], "initial downloads")
+    if not isinstance(downloads.json(), list):
+        raise AssertionError("downloads response must be a list")
 
 
 def test_invalid_download_request():
@@ -140,6 +143,7 @@ def test_runtime_path_overrides():
         ):
             assert_equal(download_root(), downloads, "download root override")
             assert_equal(data_root(), data, "data root override")
+            assert_equal(jobs_db_path(), data / "jobs.sqlite3", "jobs database override")
 
 
 def test_packaged_download_root_fallback():
@@ -278,6 +282,75 @@ def test_ai_model_manifest_execution():
         assert_equal(Path(ai_output["path"]).read_text(encoding="utf-8"), "media.mp4", "AI output")
 
 
+def test_job_history_persistence_and_recovery():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        database = root / "jobs.sqlite3"
+        active = _test_job(root, DownloadOptions())
+
+        store = JobStore(database)
+        store.save(active)
+        store.close()
+
+        service = DownloadService(root, max_workers=1, job_store=JobStore(database))
+        recovered = service.get_job(active.id)
+        assert_equal(recovered is not None, True, "recovered job exists")
+        assert_equal(recovered.status, JobStatus.CANCELLED, "interrupted job status")
+        assert_equal(
+            recovered.message,
+            "Sidecar restarted before this task completed",
+            "interrupted job message",
+        )
+        service.shutdown(wait=True)
+
+        reloaded_store = JobStore(database)
+        reloaded = reloaded_store.load_jobs()
+        assert_equal(len(reloaded), 1, "persisted history count")
+        assert_equal(reloaded[0].status, JobStatus.CANCELLED, "persisted recovered status")
+        reloaded_store.close()
+
+
+def test_job_history_deletion_contract():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        service = DownloadService(
+            root,
+            max_workers=1,
+            job_store=JobStore(root / "jobs.sqlite3"),
+        )
+        request = DownloadRequest(
+            text="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            platform=Platform.YOUTUBE,
+            options=DownloadOptions(output_dir=str(root / "downloads")),
+        )
+
+        with patch.object(service._executor, "submit", return_value=None):
+            first = service.create_download(request)
+            second = service.create_download(request)
+
+        try:
+            service.delete_job(first.id)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("active jobs must not be deleted")
+
+        cancelled = service.cancel_job(first.id)
+        assert_equal(cancelled.status, JobStatus.CANCELLED, "cancel before delete")
+        unchanged = service._update_job(
+            first.id,
+            status=JobStatus.DOWNLOADING,
+            message="late worker update",
+        )
+        assert_equal(unchanged.status, JobStatus.CANCELLED, "cancelled job cannot be revived")
+        assert_equal(service.delete_job(first.id), True, "delete terminal job")
+
+        service.cancel_job(second.id)
+        assert_equal(service.clear_terminal_jobs(), 1, "clear terminal history")
+        assert_equal(service.list_jobs(), [], "history cleared")
+        service.shutdown(wait=True)
+
+
 def _test_job(output_dir: Path, options: DownloadOptions) -> DownloadJob:
     now = datetime.now(timezone.utc)
     return DownloadJob(
@@ -306,6 +379,8 @@ def main():
     test_sidecar_config_api()
     test_media_postprocess_and_metadata()
     test_ai_model_manifest_execution()
+    test_job_history_persistence_and_recovery()
+    test_job_history_deletion_contract()
     print("Sidecar API smoke tests passed.")
 
 

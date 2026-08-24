@@ -324,6 +324,11 @@ button {
   line-height: 1.2;
 }
 
+.sectionActions {
+  display: flex;
+  gap: 8px;
+}
+
 .taskList {
   display: grid;
   gap: 10px;

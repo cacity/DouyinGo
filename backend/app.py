@@ -112,6 +112,11 @@ def list_downloads() -> list[DownloadJob]:
     return download_service.list_jobs()
 
 
+@app.delete("/api/downloads")
+def clear_downloads() -> dict[str, int]:
+    return {"deleted": download_service.clear_terminal_jobs()}
+
+
 @app.get("/api/downloads/{job_id}", response_model=DownloadJob)
 def get_download(job_id: str) -> DownloadJob:
     job = download_service.get_job(job_id)
@@ -126,3 +131,19 @@ def cancel_download(job_id: str) -> DownloadJob:
     if not job:
         raise HTTPException(status_code=404, detail="Download job not found")
     return job
+
+
+@app.delete("/api/downloads/{job_id}")
+def delete_download(job_id: str) -> dict[str, bool]:
+    try:
+        deleted = download_service.delete_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    return {"deleted": True}
+
+
+@app.on_event("shutdown")
+def shutdown_download_service() -> None:
+    download_service.shutdown()

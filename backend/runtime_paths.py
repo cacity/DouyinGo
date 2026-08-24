@@ -56,5 +56,9 @@ def config_path() -> Path:
     return data_root() / "sidecar-config.json"
 
 
+def jobs_db_path() -> Path:
+    return data_root() / "jobs.sqlite3"
+
+
 def models_dir() -> Path:
     return data_root() / "models"

@@ -153,22 +153,29 @@ Development runs retain the project-relative directories. These locations can be
 overridden with `DOUYINGO_DOWNLOADS_DIR`, `DOUYINGO_DATA_DIR`, and
 `DOUYINGO_MODELS_DIR`.
 
+Download task history is stored in `jobs.sqlite3` under the same application-data
+folder. The sidecar keeps the newest 500 terminal tasks. A queued, resolving, or
+downloading task found after a sidecar restart is retained and marked cancelled
+with an interruption message; it is never resumed implicitly. The UI can remove
+one terminal record or clear all terminal records. These actions only remove task
+history and never delete downloaded media or metadata files.
+
 ## Migration Gates
 
 Before merging this branch back to `main`, verify:
 
 1. Python compile and smoke tests pass.
 2. Sidecar health, tool inventory (including Deno and `yt-dlp-ejs`), and invalid-request API tests pass.
-3. React build passes after `npm.cmd install`.
-4. `npm.cmd run package:sidecar` produces the suffixed binary under `src-tauri/binaries/`.
-5. `npm.cmd run tauri:dev` starts the UI and can connect to the sidecar.
-6. At least one real download per platform is manually tested with legal test URLs.
-7. FFmpeg-dependent Koushare and thumbnail flows work from both source and packaged sidecar.
-8. AI model discovery is pointed at a real model directory through `DOUYINGO_MODELS_DIR` or `models/`.
+3. SQLite history survives a service restart, interrupted tasks recover as cancelled, and terminal history can be deleted without deleting output files.
+4. React build passes after `npm.cmd install`.
+5. `npm.cmd run package:sidecar` produces the suffixed binary under `src-tauri/binaries/`.
+6. `npm.cmd run tauri:dev` starts the UI and can connect to the sidecar.
+7. At least one real download per platform is manually tested with legal test URLs.
+8. FFmpeg-dependent Koushare and thumbnail flows work from both source and packaged sidecar.
+9. AI model discovery is pointed at a real model directory through `DOUYINGO_MODELS_DIR` or `models/`.
 
 ## Known Follow-Ups
 
-- Add persistent job history.
 - Add explicit per-platform cookies/proxy settings for yt-dlp.
 - Ship and validate a concrete model runner for the model family selected by the product owner.
 - Add front-end integration tests after the UI stabilizes.

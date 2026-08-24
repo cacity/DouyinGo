@@ -23,7 +23,9 @@ import {
 } from "lucide-react";
 import {
   cancelDownload,
+  clearCompletedDownloads,
   createDownload,
+  deleteDownload,
   ensureBackend,
   getConfig,
   getDownloads,
@@ -220,6 +222,24 @@ function App() {
     }
   }
 
+  async function removeJob(jobId: string) {
+    try {
+      await deleteDownload(backendUrl, jobId);
+      await refresh(backendUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function clearHistory() {
+    try {
+      await clearCompletedDownloads(backendUrl);
+      await refresh(backendUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -328,16 +348,23 @@ function App() {
           <section className="taskSection">
             <div className="sectionHeader">
               <h1>下载任务</h1>
-              <button className="iconButton" type="button" onClick={() => void connectBackend()} title="刷新">
-                <RefreshCw size={18} />
-              </button>
+              <div className="sectionActions">
+                {jobs.some((job) => ["success", "error", "cancelled"].includes(job.status)) ? (
+                  <button className="iconButton danger" type="button" onClick={() => void clearHistory()} title="清空已结束任务记录">
+                    <Trash2 size={18} />
+                  </button>
+                ) : null}
+                <button className="iconButton" type="button" onClick={() => void connectBackend()} title="刷新">
+                  <RefreshCw size={18} />
+                </button>
+              </div>
             </div>
             <div className="taskList">
               {jobs.length === 0 ? (
                 <div className="emptyState">暂无任务</div>
               ) : (
                 jobs.map((job) => (
-                  <TaskRow key={job.id} job={job} onCancel={cancel} onReveal={revealPath} />
+                  <TaskRow key={job.id} job={job} onCancel={cancel} onDelete={removeJob} onReveal={revealPath} />
                 ))
               )}
             </div>
@@ -418,10 +445,12 @@ function App() {
 function TaskRow({
   job,
   onCancel,
+  onDelete,
   onReveal
 }: {
   job: DownloadJob;
   onCancel: (jobId: string) => void;
+  onDelete: (jobId: string) => void;
   onReveal: (path: string) => Promise<void>;
 }) {
   const StatusIcon = getStatusIcon(job.status);
@@ -460,9 +489,13 @@ function TaskRow({
         </button>
         {["queued", "resolving", "downloading"].includes(job.status) ? (
           <button className="iconButton danger" type="button" onClick={() => onCancel(job.id)} title="取消任务">
+            <CircleX size={18} />
+          </button>
+        ) : (
+          <button className="iconButton danger" type="button" onClick={() => onDelete(job.id)} title="删除任务记录">
             <Trash2 size={18} />
           </button>
-        ) : null}
+        )}
       </div>
     </article>
   );

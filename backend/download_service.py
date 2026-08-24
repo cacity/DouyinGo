@@ -14,7 +14,9 @@ from core.youtube_downloader import YouTubeDownloader
 
 from backend.ai_models import get_model_runner, run_ai_postprocess
 from backend.ffmpeg_tools import find_deno, find_ffmpeg
+from backend.job_store import JobStore
 from backend.media_postprocess import append_metadata_file, transform_downloaded_media
+from backend.runtime_paths import jobs_db_path
 from backend.schemas import (
     DownloadJob,
     DownloadOptions,
@@ -37,14 +39,24 @@ QUALITY_ALIASES = {
     "标清(480p)": "480p",
 }
 
+ACTIVE_STATUSES = {JobStatus.QUEUED, JobStatus.RESOLVING, JobStatus.DOWNLOADING}
+TERMINAL_STATUSES = {JobStatus.SUCCESS, JobStatus.ERROR, JobStatus.CANCELLED}
+
 
 class DownloadService:
-    def __init__(self, project_root: Path | None = None, max_workers: int = 3):
+    def __init__(
+        self,
+        project_root: Path | None = None,
+        max_workers: int = 3,
+        job_store: JobStore | None = None,
+    ):
         self.project_root = project_root or Path(__file__).resolve().parents[1]
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="download")
-        self._jobs: dict[str, DownloadJob] = {}
+        self._job_store = job_store or JobStore(jobs_db_path())
+        self._jobs = {job.id: job for job in self._job_store.load_jobs()}
         self._cancel_requested: set[str] = set()
         self._lock = threading.RLock()
+        self._recover_interrupted_jobs()
 
     def create_download(self, request: DownloadRequest) -> DownloadJob:
         resolved = extract_url(request.text, request.platform)
@@ -78,6 +90,7 @@ class DownloadService:
 
         with self._lock:
             self._jobs[job.id] = job
+            self._job_store.save(job)
 
         self._executor.submit(self._run_download, job.id)
         return job
@@ -95,12 +108,55 @@ class DownloadService:
             job = self._jobs.get(job_id)
             if not job:
                 return None
+            if job.status in TERMINAL_STATUSES:
+                return job
             self._cancel_requested.add(job_id)
             if job.status in {JobStatus.QUEUED, JobStatus.RESOLVING}:
-                job.status = JobStatus.CANCELLED
-                job.message = "Cancelled before download started"
-                job.updated_at = datetime.now(timezone.utc)
-            return job
+                return self._update_job(
+                    job_id,
+                    status=JobStatus.CANCELLED,
+                    message="Cancelled before download started",
+                    error=None,
+                )
+            return self._update_job(job_id, message="Cancellation requested")
+
+    def delete_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return False
+            if job.status in ACTIVE_STATUSES:
+                raise ValueError("Active download jobs must be cancelled before deletion")
+            self._job_store.delete(job_id)
+            del self._jobs[job_id]
+            self._cancel_requested.discard(job_id)
+            return True
+
+    def clear_terminal_jobs(self) -> int:
+        with self._lock:
+            terminal_ids = [
+                job_id for job_id, job in self._jobs.items() if job.status in TERMINAL_STATUSES
+            ]
+            deleted = self._job_store.delete_terminal()
+            for job_id in terminal_ids:
+                self._jobs.pop(job_id, None)
+                self._cancel_requested.discard(job_id)
+            return deleted
+
+    def shutdown(self, wait: bool = False) -> None:
+        with self._lock:
+            for job_id, job in list(self._jobs.items()):
+                if job.status in ACTIVE_STATUSES:
+                    self._cancel_requested.add(job_id)
+                    self._update_job(
+                        job_id,
+                        status=JobStatus.CANCELLED,
+                        message="Sidecar stopped before this task completed",
+                        error=None,
+                    )
+        self._executor.shutdown(wait=wait, cancel_futures=True)
+        if wait:
+            self._job_store.close()
 
     def resolve_info(self, text: str, platform: Platform | None = None) -> dict[str, Any]:
         resolved = extract_url(text, platform)
@@ -241,11 +297,19 @@ class DownloadService:
             job = self._jobs.get(job_id)
             if not job:
                 return None
+            next_status = changes.get("status")
+            if (
+                job.status == JobStatus.CANCELLED
+                and next_status is not None
+                and next_status != JobStatus.CANCELLED
+            ):
+                return job
             data = job.model_dump()
             data.update(changes)
             data["updated_at"] = datetime.now(timezone.utc)
             updated = DownloadJob.model_validate(data)
             self._jobs[job_id] = updated
+            self._job_store.save(updated)
             return updated
 
     def _is_cancelled(self, job_id: str) -> bool:
@@ -254,6 +318,21 @@ class DownloadService:
             return job_id in self._cancel_requested or (
                 bool(job) and job.status == JobStatus.CANCELLED
             )
+
+    def _recover_interrupted_jobs(self) -> None:
+        for job_id, job in list(self._jobs.items()):
+            if job.status not in ACTIVE_STATUSES:
+                continue
+            data = job.model_dump()
+            data.update(
+                status=JobStatus.CANCELLED,
+                message="Sidecar restarted before this task completed",
+                error=None,
+                updated_at=datetime.now(timezone.utc),
+            )
+            recovered = DownloadJob.model_validate(data)
+            self._jobs[job_id] = recovered
+            self._job_store.save(recovered)
 
 
 def _normalize_quality(platform: Platform, quality: str) -> str:

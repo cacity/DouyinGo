@@ -78,6 +78,18 @@ export function cancelDownload(baseUrl: string, jobId: string) {
   });
 }
 
+export function deleteDownload(baseUrl: string, jobId: string) {
+  return apiFetch<{ deleted: boolean }>(baseUrl, `/api/downloads/${jobId}`, {
+    method: "DELETE"
+  });
+}
+
+export function clearCompletedDownloads(baseUrl: string) {
+  return apiFetch<{ deleted: number }>(baseUrl, "/api/downloads", {
+    method: "DELETE"
+  });
+}
+
 export function getTools(baseUrl: string) {
   return apiFetch<ToolInfo[]>(baseUrl, "/api/tools");
 }
