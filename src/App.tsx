@@ -309,7 +309,7 @@ function App() {
         </nav>
         <button className="sidebarFooter" type="button" onClick={openSettings} title="设置">
           <Settings size={16} />
-          <span>v2.0.1</span>
+          <span>v2.0.2</span>
         </button>
       </aside>
 

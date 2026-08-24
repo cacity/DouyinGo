@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,15 @@ from typing import Any
 VIDEO_FORMATS = {"mp4", "mkv", "mov"}
 AUDIO_FORMATS = {"mp3", "m4a", "wav"}
 COVER_FORMATS = {"jpg"}
+
+
+def positive_number(value: Any) -> float:
+    """Return a finite positive number or zero for missing progress values."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return number if math.isfinite(number) and number > 0 else 0
 
 
 def normalize_media_format(download_type: str, output_format: str) -> str:

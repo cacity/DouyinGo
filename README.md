@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.2-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 ![Platform](https://img.shields.io/badge/desktop-Windows%20x64-lightgrey.svg)
@@ -297,7 +297,11 @@ AI runner 取消后的进程回收。
 
 ## 📝 更新日志
 
-### v2.0.1 (当前版本)
+### v2.0.2 (当前版本)
+- 🐛 修复 yt-dlp 在速度或剩余时间为空时导致任务在合并阶段失败
+- ✅ 新增 YouTube 与 Twitter/X 空进度字段回归测试
+
+### v2.0.1
 - 🐛 修复打包版 YouTube 403，并捆绑 Deno、yt-dlp-ejs、FFmpeg 与 ffprobe
 - 🎵 下载类型与格式真实生效，新增音频、封面和元数据输出
 - 🤖 新增可验证的本地 AI 模型运行器清单

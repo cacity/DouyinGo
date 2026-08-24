@@ -12,7 +12,12 @@ import sys
 from typing import Optional, Dict, Any, Callable
 from loguru import logger
 
-from core.ytdlp_media import collect_media_files, media_options, output_template
+from core.ytdlp_media import (
+    collect_media_files,
+    media_options,
+    output_template,
+    positive_number,
+)
 
 
 # 添加父目录到路径
@@ -280,8 +285,8 @@ class TwitterDownloader:
                 # 只在进度变化至少1%时才更新（避免频繁更新导致UI闪烁）
                 if progress != self._last_progress:
                     self._last_progress = progress
-                    speed = d.get('speed', 0)
-                    eta = d.get('eta', 0)
+                    speed = positive_number(d.get('speed'))
+                    eta = positive_number(d.get('eta'))
 
                     message = f"下载中 {progress}%"
                     if speed > 0:

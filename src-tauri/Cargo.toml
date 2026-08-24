@@ -1,6 +1,6 @@
 [package]
 name = "douyingo_desktop"
-version = "2.0.1"
+version = "2.0.2"
 description = "DouyinGo React/Tauri desktop shell"
 authors = ["DouyinGo Team"]
 edition = "2021"

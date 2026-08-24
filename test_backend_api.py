@@ -200,6 +200,46 @@ def test_youtube_packaged_runtime_options():
         )
 
 
+def test_ytdlp_progress_handles_missing_metrics():
+    progress_payload = {
+        "status": "downloading",
+        "total_bytes": 100,
+        "downloaded_bytes": 95,
+        "speed": None,
+        "eta": None,
+    }
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for downloader_type in (YouTubeDownloader, TwitterDownloader):
+            updates = []
+            downloader = downloader_type(temp_dir)
+            downloader._progress_hook(
+                progress_payload,
+                lambda *args: updates.append(args),
+            )
+            assert_equal(
+                updates,
+                [(95, "下载中 95%")],
+                f"{downloader_type.__name__} null progress",
+            )
+
+            downloader._last_progress = -1
+            invalid_payload = {
+                **progress_payload,
+                "speed": "unknown",
+                "eta": float("inf"),
+            }
+            downloader._progress_hook(
+                invalid_payload,
+                lambda *args: updates.append(args),
+            )
+            assert_equal(
+                updates[-1],
+                (95, "下载中 95%"),
+                f"{downloader_type.__name__} invalid progress",
+            )
+
+
 def test_runtime_path_overrides():
     with tempfile.TemporaryDirectory() as temp_dir:
         downloads = Path(temp_dir) / "downloads"
@@ -639,6 +679,7 @@ def main():
     test_invalid_download_request()
     test_sidecar_lifecycle_arguments()
     test_youtube_packaged_runtime_options()
+    test_ytdlp_progress_handles_missing_metrics()
     test_runtime_path_overrides()
     test_packaged_download_root_fallback()
     test_media_option_contract()
