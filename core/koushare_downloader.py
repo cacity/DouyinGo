@@ -9,10 +9,12 @@ import hashlib
 import json
 import os
 import platform
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -28,8 +30,15 @@ class KoushareDownloader:
     API_BASE = "https://api-core.koushare.com"
     SALT_KEY = "arfw2r4k4rdwrlmchvcu7q61fs"
 
-    def __init__(self, download_dir: str = "koushare_downloads"):
+    def __init__(
+        self,
+        download_dir: str = "koushare_downloads",
+        api_base: Optional[str] = None,
+    ):
         self.download_dir = download_dir
+        self.api_base = (
+            api_base or os.getenv("DOUYINGO_KOUSHARE_API_BASE") or self.API_BASE
+        ).rstrip("/")
         self._access_token = ""
         self._session: Optional[requests.Session] = None
         os.makedirs(download_dir, exist_ok=True)
@@ -250,7 +259,7 @@ class KoushareDownloader:
         raise ValueError(f"无法识别的寇享 URL 格式: {url}")
 
     def _get_live_info(self, live_id: str) -> Dict[str, Any]:
-        url = f"{self.API_BASE}/live/v2/live/{live_id}"
+        url = f"{self.api_base}/live/v2/live/{live_id}"
         response = self._get_session().get(url, headers=self._signed_headers({}, "get"), timeout=15)
         response.raise_for_status()
         data = response.json()
@@ -261,7 +270,7 @@ class KoushareDownloader:
     def _get_live_video_info(self, live_id: str, video_id: str) -> Dict[str, Any]:
         params = {"liveId": int(live_id), "pageNum": 1, "pageSize": 200}
         response = self._get_session().get(
-            f"{self.API_BASE}/live/v1/user/livePlayback/list",
+            f"{self.api_base}/live/v1/user/livePlayback/list",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,
@@ -276,7 +285,7 @@ class KoushareDownloader:
 
     def _get_live_playback(self, live_id: str, video_id: str) -> Dict[str, Any]:
         response = self._get_session().post(
-            f"{self.API_BASE}/live/v2/live/playback/{live_id}",
+            f"{self.api_base}/live/v2/live/playback/{live_id}",
             params={"videoId": video_id},
             json={},
             headers=self._signed_headers({"videoId": video_id}, "post"),
@@ -291,7 +300,7 @@ class KoushareDownloader:
     def _check_video_auth(self, video_id: str) -> str:
         body = {"id": video_id}
         response = self._get_session().post(
-            f"{self.API_BASE}/video/v1/video/checkVideoAuth",
+            f"{self.api_base}/video/v1/video/checkVideoAuth",
             json=body,
             headers=self._signed_headers(body, "post"),
             timeout=15,
@@ -305,7 +314,7 @@ class KoushareDownloader:
     def _get_video_title(self, video_id: str, secret: str) -> str:
         params = {"id": video_id, "secret": secret}
         response = self._get_session().get(
-            f"{self.API_BASE}/video/v1/video/info",
+            f"{self.api_base}/video/v1/video/info",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,
@@ -316,7 +325,7 @@ class KoushareDownloader:
     def _get_video_play_address(self, video_id: str, secret: str) -> Dict[str, Any]:
         params = {"videoId": video_id, "secret": secret}
         response = self._get_session().get(
-            f"{self.API_BASE}/video/v1/video/getVideoPlayAddress",
+            f"{self.api_base}/video/v1/video/getVideoPlayAddress",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,
@@ -411,6 +420,15 @@ class KoushareDownloader:
         return f"{best_height}p" if best_height else "未知"
 
     def _get_ffmpeg_executable(self) -> str:
+        try:
+            from backend.ffmpeg_tools import find_ffmpeg
+
+            ffmpeg_path = find_ffmpeg()
+            if ffmpeg_path:
+                return ffmpeg_path
+        except Exception:
+            pass
+
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         local_windows_ffmpeg = os.path.join(project_root, "ffmpeg.exe")
         if platform.system() == "Windows" and os.path.exists(local_windows_ffmpeg):
@@ -488,9 +506,35 @@ class KoushareDownloader:
         )
 
         out_time_us = 0
-        if process.stdout is not None:
-            for line in process.stdout:
-                line = line.strip()
+        last_percent = 30
+        last_message = "正在下载视频流..."
+        output_queue: queue.Queue[str | None] = queue.Queue()
+
+        def read_progress() -> None:
+            try:
+                if process.stdout is not None:
+                    for output_line in process.stdout:
+                        output_queue.put(output_line)
+            finally:
+                output_queue.put(None)
+
+        reader = threading.Thread(target=read_progress, name="ffmpeg-progress", daemon=True)
+        reader.start()
+        next_heartbeat = time.monotonic() + 1
+        try:
+            while True:
+                try:
+                    queued_line = output_queue.get(timeout=0.25)
+                except queue.Empty:
+                    if process.poll() is not None and not reader.is_alive():
+                        break
+                    if time.monotonic() >= next_heartbeat:
+                        self._report_progress(progress_callback, last_percent, last_message)
+                        next_heartbeat = time.monotonic() + 1
+                    continue
+                if queued_line is None:
+                    break
+                line = queued_line.strip()
                 if line.startswith("out_time_us="):
                     try:
                         out_time_us = int(line.split("=", 1)[1])
@@ -499,17 +543,44 @@ class KoushareDownloader:
                 elif line.startswith("progress=") and total_duration > 0:
                     elapsed_seconds = out_time_us / 1_000_000
                     percent = int(30 + min(elapsed_seconds / total_duration, 1.0) * 67)
+                    last_percent = percent
+                    last_message = (
+                        f"下载中 {self._format_time(elapsed_seconds)} / "
+                        f"{self._format_time(total_duration)}"
+                    )
                     self._report_progress(
                         progress_callback,
                         percent,
-                        f"下载中 {self._format_time(elapsed_seconds)} / {self._format_time(total_duration)}",
+                        last_message,
                     )
 
-        process.wait()
-        if process.returncode != 0:
-            raise RuntimeError(f"ffmpeg 下载失败（returncode={process.returncode}）")
+            process.wait()
+            if process.returncode != 0:
+                raise RuntimeError(f"ffmpeg 下载失败（returncode={process.returncode}）")
+        except BaseException:
+            self._stop_ffmpeg(process)
+            try:
+                os.unlink(output_path)
+            except FileNotFoundError:
+                pass
+            raise
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+            reader.join(timeout=1)
 
         self._report_progress(progress_callback, 100, "下载完成")
+
+    @staticmethod
+    def _stop_ffmpeg(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
     def _format_time(self, seconds: float) -> str:
         total_seconds = int(seconds) if seconds else 0

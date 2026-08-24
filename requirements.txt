@@ -1,20 +1,25 @@
 # Douyin App - 抖音视频下载器依赖包
-# Python 3.7+ required
+# Python 3.10+ required
 
-# GUI Framework - PyQt5
-PyQt5>=5.15.0,<6.0.0
+# Python sidecar API
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.34.0,<1.0.0
+pydantic>=2.9.0,<3.0.0
 
 # HTTP Requests
 requests>=2.31.0,<3.0.0
 
 # Multi-platform Video Downloader
-yt-dlp>=2023.12.30
+yt-dlp[default,deno]==2026.8.19
 
 # HTTP Client with HTTP/2 support
 httpx[http2]>=0.28.1
 
 # Logging
 loguru>=0.7.3
+
+# Sidecar packaging
+pyinstaller>=6.0.0,<7.0.0
 
 # Note: ffmpeg is required for video thumbnail extraction
 # Install ffmpeg separately:

@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend import __version__
+from backend.ai_models import configured_model_status, get_model_runner
+from backend.download_service import DownloadService
+from backend.ffmpeg_tools import collect_tool_status
+from backend.runtime_paths import config_path, download_root, models_dir
+from backend.schemas import (
+    DownloadJob,
+    DownloadRequest,
+    HealthResponse,
+    ResolveRequest,
+    SidecarConfig,
+    ToolInfo,
+)
+
+
+download_service = DownloadService(download_root())
+
+app = FastAPI(title="DouyinGo Sidecar", version=__version__)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ],
+    allow_origin_regex=r"^http://(?:127\.0\.0\.1|localhost):\d+$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(
+        ok=True,
+        service="douyingo-sidecar",
+        version=__version__,
+        time=datetime.now(timezone.utc),
+    )
+
+
+@app.get("/api/config", response_model=SidecarConfig)
+def get_config() -> SidecarConfig:
+    return _read_config()
+
+
+def _read_config() -> SidecarConfig:
+    path = config_path()
+    if not path.exists():
+        return SidecarConfig()
+    try:
+        return SidecarConfig.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return SidecarConfig()
+
+
+@app.put("/api/config", response_model=SidecarConfig)
+def update_config(config: SidecarConfig) -> SidecarConfig:
+    if config.ai_model_id:
+        try:
+            get_model_runner(config.ai_model_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if config.output_dir:
+        try:
+            output_dir = download_service.project_root / config.output_dir
+            if not output_dir.is_absolute():
+                output_dir = output_dir.resolve()
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    path = config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return config
+
+
+@app.get("/api/tools", response_model=list[ToolInfo])
+def get_tools() -> list[ToolInfo]:
+    return collect_tool_status()
+
+
+@app.get("/api/models")
+def get_models():
+    return configured_model_status()
+
+
+@app.post("/api/models/directory")
+def ensure_models_directory() -> dict[str, str]:
+    path = models_dir()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"path": str(path)}
+
+
+@app.post("/api/resolve")
+def resolve_media(request: ResolveRequest) -> dict:
+    try:
+        return download_service.resolve_info(request.text, request.platform, _read_config())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/downloads", response_model=DownloadJob)
+def create_download(request: DownloadRequest) -> DownloadJob:
+    try:
+        return download_service.create_download(request, _read_config())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/downloads", response_model=list[DownloadJob])
+def list_downloads() -> list[DownloadJob]:
+    return download_service.list_jobs()
+
+
+@app.delete("/api/downloads")
+def clear_downloads() -> dict[str, int]:
+    return {"deleted": download_service.clear_terminal_jobs()}
+
+
+@app.get("/api/downloads/{job_id}", response_model=DownloadJob)
+def get_download(job_id: str) -> DownloadJob:
+    job = download_service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    return job
+
+
+@app.post("/api/downloads/{job_id}/cancel", response_model=DownloadJob)
+def cancel_download(job_id: str) -> DownloadJob:
+    job = download_service.cancel_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    return job
+
+
+@app.delete("/api/downloads/{job_id}")
+def delete_download(job_id: str) -> dict[str, bool]:
+    try:
+        deleted = download_service.delete_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    return {"deleted": True}
+
+
+@app.on_event("shutdown")
+def shutdown_download_service() -> None:
+    download_service.shutdown()

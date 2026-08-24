@@ -1,6 +1,20 @@
 # Python cache
 __pycache__/
 *.pyc
+*.log
+
+# Python sidecar packaging
+build/
+*.spec
+
+# React/Tauri desktop build output
+node_modules/
+.npm-cache/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
 
 # Download output directories
 *_downloads/
@@ -11,3 +25,9 @@ koushare_downloads/
 
 # Test-generated directories
 test_*_downloads/
+
+# Local sidecar state
+jobs.sqlite3
+jobs.sqlite3-shm
+jobs.sqlite3-wal
+sidecar-config.json

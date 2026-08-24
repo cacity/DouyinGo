@@ -12,6 +12,13 @@ import sys
 from typing import Optional, Dict, Any, Callable
 from loguru import logger
 
+from core.ytdlp_media import (
+    collect_media_files,
+    media_options,
+    output_template,
+    positive_number,
+)
+
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -26,12 +33,23 @@ except ImportError:
 class YouTubeDownloader:
     """YouTube视频下载器"""
 
-    def __init__(self, download_dir: str = "youtube_downloads"):
+    def __init__(
+        self,
+        download_dir: str = "youtube_downloads",
+        ffmpeg_path: Optional[str] = None,
+        deno_path: Optional[str] = None,
+        proxy_url: Optional[str] = None,
+        cookies_from_browser: Optional[str] = None,
+    ):
         """
         初始化下载器
         :param download_dir: 下载目录
         """
         self.download_dir = download_dir
+        self.ffmpeg_path = ffmpeg_path
+        self.deno_path = deno_path
+        self.proxy_url = proxy_url
+        self.cookies_from_browser = cookies_from_browser
         os.makedirs(download_dir, exist_ok=True)
         self._last_progress = -1  # 记录上次报告的进度
 
@@ -68,6 +86,7 @@ class YouTubeDownloader:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            **self._runtime_options(),
         }
 
         try:
@@ -93,8 +112,15 @@ class YouTubeDownloader:
             logger.error(f"获取YouTube视频信息失败: {e}")
             return None
 
-    def download_video(self, url: str, download_dir: Optional[str] = None,
-                      quality: str = "best", progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    def download_video(
+        self,
+        url: str,
+        download_dir: Optional[str] = None,
+        quality: str = "best",
+        progress_callback: Optional[Callable] = None,
+        download_type: str = "video",
+        output_format: str = "mp4",
+    ) -> Dict[str, Any]:
         """
         下载YouTube视频
         :param url: YouTube视频URL
@@ -115,15 +141,21 @@ class YouTubeDownloader:
         os.makedirs(target_dir, exist_ok=True)
 
         # 配置下载选项
+        download_options = media_options(download_type, output_format)
         ydl_opts = {
-            'format': self._get_format_selector(quality),
-            'outtmpl': os.path.join(target_dir, '%(title)s.%(ext)s'),
+            'outtmpl': output_template(target_dir),
             'quiet': False,
             'no_warnings': False,
             'continuedl': True,
             'noprogress': False,
+            'retries': 3,
+            'fragment_retries': 3,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)] if progress_callback else [],
+            **download_options,
+            **self._runtime_options(),
         }
+        if download_type == "video":
+            ydl_opts['format'] = self._get_format_selector(quality)
 
         try:
             logger.info(f"开始下载YouTube视频: {url}")
@@ -131,30 +163,14 @@ class YouTubeDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
 
-                # 获取下载的文件信息
-                downloaded_files = []
-
-                # 主视频文件
-                if 'requested_downloads' in info:
-                    for download_info in info['requested_downloads']:
-                        downloaded_files.append({
-                            "type": "video",
-                            "path": download_info.get('filepath', ''),
-                            "size": download_info.get('filesize', 0),
-                            "format": download_info.get('format', ''),
-                            "ext": download_info.get('ext', ''),
-                            "fps": download_info.get('fps', 0),
-                            "resolution": f"{download_info.get('width', 0)}x{download_info.get('height', 0)}"
-                        })
-
-                # 缩略图
-                thumbnail_path = os.path.join(target_dir, f"{info.get('title', 'video')}_thumbnail.jpg")
-                if info.get('thumbnail'):
-                    downloaded_files.append({
-                        "type": "thumbnail",
-                        "path": thumbnail_path,
-                        "url": info.get('thumbnail', '')
-                    })
+                downloaded_files = collect_media_files(
+                    target_dir,
+                    info,
+                    download_type,
+                    output_format,
+                )
+                if not downloaded_files:
+                    raise RuntimeError("yt-dlp completed without producing the requested output file")
 
                 logger.info(f"YouTube视频下载完成: {info.get('title', 'unknown')}")
 
@@ -183,17 +199,36 @@ class YouTubeDownloader:
         :return: yt-dlp格式选择器
         """
         quality_map = {
-            "best": "best[ext=mp4]/best",
+            "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best",
             "worst": "worst[ext=mp4]/worst",
-            "4k": "best[height<=2160][ext=mp4]/best[height<=2160]/best",
-            "1440p": "best[height<=1440][ext=mp4]/best[height<=1440]/best",
-            "1080p": "best[height<=1080][ext=mp4]/best[height<=1080]/best",
-            "720p": "best[height<=720][ext=mp4]/best[height<=720]/best",
-            "480p": "best[height<=480][ext=mp4]/best[height<=480]/best",
-            "360p": "best[height<=360][ext=mp4]/best[height<=360]/best",
+            "4k": self._bounded_format_selector(2160),
+            "1440p": self._bounded_format_selector(1440),
+            "1080p": self._bounded_format_selector(1080),
+            "720p": self._bounded_format_selector(720),
+            "480p": self._bounded_format_selector(480),
+            "360p": self._bounded_format_selector(360),
         }
 
-        return quality_map.get(quality, "best[ext=mp4]/best")
+        return quality_map.get(quality, quality_map["best"])
+
+    def _bounded_format_selector(self, height: int) -> str:
+        limit = f"[height<={height}]"
+        return (
+            f"bestvideo{limit}[ext=mp4]+bestaudio[ext=m4a]/"
+            f"best{limit}[ext=mp4]/bestvideo{limit}+bestaudio/best{limit}"
+        )
+
+    def _runtime_options(self) -> Dict[str, Any]:
+        options: Dict[str, Any] = {}
+        if self.ffmpeg_path:
+            options['ffmpeg_location'] = self.ffmpeg_path
+        if self.deno_path:
+            options['js_runtimes'] = {'deno': {'path': self.deno_path}}
+        if self.proxy_url:
+            options['proxy'] = self.proxy_url
+        if self.cookies_from_browser:
+            options['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        return options
 
     def _progress_hook(self, d: Dict[str, Any], callback: Optional[Callable] = None):
         """
@@ -226,8 +261,8 @@ class YouTubeDownloader:
                 # 只在进度变化至少1%时才更新（避免频繁更新导致UI闪烁）
                 if progress != self._last_progress:
                     self._last_progress = progress
-                    speed = d.get('speed', 0)
-                    eta = d.get('eta', 0)
+                    speed = positive_number(d.get('speed'))
+                    eta = positive_number(d.get('eta'))
 
                     message = f"下载中 {progress}%"
                     if speed > 0:

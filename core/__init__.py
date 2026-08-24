@@ -5,17 +5,22 @@
 核心功能模块
 """
 
-import os
-import sys
-
-# 添加父目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from core.downloader import DownloadManager, DownloadWorker
-from core.koushare_downloader import KoushareDownloader
-
 __all__ = [
     'DownloadManager',
     'DownloadWorker',
     'KoushareDownloader'
 ]
+
+
+def __getattr__(name):
+    if name in {'DownloadManager', 'DownloadWorker'}:
+        from core.downloader import DownloadManager, DownloadWorker
+
+        return {'DownloadManager': DownloadManager, 'DownloadWorker': DownloadWorker}[name]
+
+    if name == 'KoushareDownloader':
+        from core.koushare_downloader import KoushareDownloader
+
+        return KoushareDownloader
+
+    raise AttributeError(name)

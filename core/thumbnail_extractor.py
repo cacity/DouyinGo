@@ -9,6 +9,19 @@ import os
 import subprocess
 
 
+def _find_tool(name: str) -> str:
+    try:
+        from backend.ffmpeg_tools import find_ffmpeg, find_ffprobe
+
+        if name == "ffmpeg":
+            return find_ffmpeg() or name
+        if name == "ffprobe":
+            return find_ffprobe() or name
+    except Exception:
+        return name
+    return name
+
+
 def extract_thumbnail(video_path: str, output_path: str = None, time_position: str = "00:00:01") -> str:
     """
     从视频中提取缩略图
@@ -28,7 +41,7 @@ def extract_thumbnail(video_path: str, output_path: str = None, time_position: s
         # 检查 ffmpeg 是否可用
         try:
             subprocess.run(
-                ["ffmpeg", "-version"],
+                [_find_tool("ffmpeg"), "-version"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=5
@@ -44,7 +57,7 @@ def extract_thumbnail(video_path: str, output_path: str = None, time_position: s
         # -q:v 2: 质量（1-31，越小质量越好）
         # -vf scale=120:68: 缩放到指定大小
         cmd = [
-            "ffmpeg",
+            _find_tool("ffmpeg"),
             "-ss", time_position,
             "-i", video_path,
             "-vframes", "1",
@@ -87,7 +100,7 @@ def get_video_duration(video_path: str) -> float:
     try:
         # 使用 ffprobe 获取视频时长
         cmd = [
-            "ffprobe",
+            _find_tool("ffprobe"),
             "-v", "error",
             "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1",
@@ -143,7 +156,7 @@ def check_ffmpeg_available() -> bool:
     """
     try:
         result = subprocess.run(
-            ["ffmpeg", "-version"],
+            [_find_tool("ffmpeg"), "-version"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=5

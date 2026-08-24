@@ -28,7 +28,7 @@ def setup_app():
     # 创建应用
     app = QApplication(sys.argv)
     app.setApplicationName("VideoGo")
-    app.setApplicationVersion("2.0.0")
+    app.setApplicationVersion("2.0.1")
     app.setOrganizationName("VideoGo")
 
     # 设置应用图标
@@ -48,7 +48,7 @@ def setup_app():
 def main():
     """主函数"""
     print("=" * 60)
-    print("VideoGo - 多平台视频下载工具 v2.0.0")
+    print("VideoGo - 多平台视频下载工具 v2.0.1")
     print("=" * 60)
     print()
     print("🎵 支持抖音视频下载")
