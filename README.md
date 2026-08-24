@@ -3,7 +3,9 @@
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-2.0.2-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10+-green.svg)
+![Desktop](https://img.shields.io/badge/desktop-Tauri%202-blue.svg)
+![Frontend](https://img.shields.io/badge/frontend-React%2019-61dafb.svg)
+![Sidecar](https://img.shields.io/badge/sidecar-Python%203.10+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 ![Platform](https://img.shields.io/badge/desktop-Windows%20x64-lightgrey.svg)
 
@@ -47,23 +49,13 @@
 - **📁 多任务下载** - 支持多个下载任务并发执行
 - **💻 现代 UI** - 简洁美观的图形界面
 - **🚀 本地 sidecar** - 下载与媒体处理均在本机 Python sidecar 中完成
-
-## 📸 旧 PyQt 界面对照
-
-以下截图仅用于迁移前后对照；当前桌面界面位于 `src/`。
-
-![](https://raw.githubusercontent.com/cacityfauh-ui/MyPic/master/pic/20251118143806888.png)
-
-![](https://raw.githubusercontent.com/cacityfauh-ui/MyPic/master/pic/20251118143845131.png)
-
-![](https://raw.githubusercontent.com/cacityfauh-ui/MyPic/master/pic/20251118153424125.png)
-
-
+- **🤖 本地 AI 扩展** - 通过受控 runner manifest 对下载结果执行本地后处理
 
 ## 🛠️ 技术栈
 
 - **桌面界面**: React 19 + Vite + Tauri 2
 - **本地后端**: FastAPI + Python sidecar
+- **任务存储**: SQLite
 - **下载引擎**: yt-dlp + 平台定制下载器
 - **HTTP 请求**: requests + httpx
 - **视频处理**: FFmpeg + ffprobe
@@ -74,8 +66,9 @@
 
 ### Windows 安装包
 
-发布版安装包已经包含 Python sidecar、FFmpeg、ffprobe、yt-dlp、Deno 和
-`yt-dlp-ejs`，终端用户不需要单独安装 Python 或媒体工具。
+运行 `DouyinGo_2.0.2_x64-setup.exe` 完成安装。发布版已经包含 Python
+sidecar、FFmpeg、ffprobe、yt-dlp、Deno 和 `yt-dlp-ejs`，终端用户不需要
+单独安装 Python、Node.js、Rust 或媒体工具。
 
 ### 源码开发要求
 
@@ -94,10 +87,10 @@ git clone <项目地址>
 cd DouyinGo
 ```
 
-2. **安装依赖**
+2. **安装 Python sidecar 与构建依赖**
 
-```bash
-pip install -r requirements.txt
+```powershell
+python -m pip install -r requirements.txt
 ```
 
 3. **安装 FFmpeg 与 ffprobe**
@@ -107,37 +100,35 @@ pip install -r requirements.txt
 
 4. **安装前端依赖**
 
-```bash
-npm install
+```powershell
+npm.cmd install
 ```
 
 5. **运行桌面开发版**
 
-```bash
-npm run package:sidecar
-npm run tauri:dev
+```powershell
+npm.cmd run package:sidecar
+npm.cmd run tauri:dev
 ```
 
 生成完整 NSIS 安装包：
 
-```bash
-npm run tauri:build
+```powershell
+npm.cmd run tauri:build
 ```
 
 该命令会先重新打包 Python sidecar，避免把旧后端误装进新桌面版本。
-
-旧 PyQt 入口 `python main.py` 仅保留用于迁移对照，不是新桌面版入口。需要
-运行旧入口时，另行安装 `requirements-legacy.txt`。
 
 ## 📖 使用说明
 
 ### 基本使用流程
 
 1. **选择平台** - 在左侧边栏选择要下载的平台（抖音/YouTube/Twitter/寇享）
-2. **复制链接** - 复制对应平台的视频链接
-3. **粘贴下载** - 点击「粘贴链接」按钮，程序自动识别并下载
-4. **查看进度** - 实时查看下载进度和状态
-5. **打开文件** - 下载完成后可直接打开所在文件夹
+2. **粘贴内容** - 输入视频链接或平台分享文本
+3. **设置参数** - 选择视频、音频或封面，以及画质、格式和 AI 后处理
+4. **开始下载** - 点击「开始下载」，sidecar 解析并执行任务
+5. **查看进度** - 实时查看下载进度和状态
+6. **打开文件** - 下载完成后可直接打开所在文件夹
 
 ### 支持的链接格式
 
@@ -193,39 +184,25 @@ npm run tauri:build
 
 ```
 DouyinGo/
-├── main.py                      # 旧 PyQt 对照入口
-├── src/                         # React 桌面界面
-├── src-tauri/                   # Tauri 外壳与 sidecar 生命周期
-├── backend/                     # FastAPI sidecar API 与任务服务
-├── scripts/build_sidecar.py     # PyInstaller sidecar 打包
-├── scripts/verify_media_contract.py # 打包媒体与取消契约
-├── requirements.txt             # sidecar 与构建依赖
-├── requirements-legacy.txt      # 可选旧 PyQt 对照依赖
-├── README.md                    # 项目说明文档
+├── src/                         # React 19 桌面界面
+│   ├── App.tsx                  # 主工作区与设置界面
+│   ├── api.ts                   # sidecar API 客户端
+│   └── styles.css               # 响应式桌面样式
+├── src-tauri/                   # Tauri 2 外壳
+│   ├── src/                     # sidecar 生命周期与原生命令
+│   ├── capabilities/            # Tauri 权限配置
+│   └── tauri.conf.json          # 桌面与安装包配置
+├── backend/                     # FastAPI sidecar、任务与 SQLite 存储
+├── core/                        # 平台下载器与媒体处理实现
+├── scripts/
+│   ├── build_sidecar.py         # PyInstaller sidecar 打包
+│   └── verify_media_contract.py # 源码/打包媒体契约验证
+├── docs/                        # 架构、迁移与验证记录
+├── resources/                   # 应用图标等资源
+├── requirements.txt             # Python sidecar 与构建依赖
+├── package.json                 # React/Tauri 命令与前端依赖
 ├── test_backend_api.py          # sidecar API 与生命周期测试
-├── test_core_functions.py       # 核心功能测试
-├── core/                        # 核心下载模块
-│   ├── __init__.py
-│   ├── downloader.py           # 抖音下载器
-│   ├── pure_python_extractor.py # 抖音解析器
-│   ├── thumbnail_extractor.py  # 缩略图处理
-│   ├── youtube_downloader.py   # YouTube下载器
-│   ├── twitter_downloader.py   # Twitter下载器
-│   └── koushare_downloader.py  # 寇享下载器
-├── ui/                         # 旧 PyQt 对照界面
-│   ├── __init__.py
-│   ├── main_window.py          # 主窗口
-│   ├── sidebar.py              # 侧边栏
-│   ├── topbar.py               # 顶部工具栏
-│   ├── video_list.py           # 视频列表
-│   └── styles.py               # 界面样式
-├── resources/                  # 资源文件
-│   └── icons/                  # 图标文件
-│       └── icons8-youtube-100.png
-├── douyin_downloads/           # 抖音下载目录
-├── youtube_downloads/          # YouTube下载目录
-├── twitter_downloads/          # Twitter下载目录
-└── koushare_downloads/         # 寇享下载目录
+└── test_core_functions.py       # 核心下载功能测试
 ```
 
 ## 🔧 技术实现
@@ -256,11 +233,9 @@ DouyinGo/
 
 ### 下载目录
 
-默认按平台分别保存到下载目录中：
-- `douyin_downloads/`
-- `youtube_downloads/`
-- `twitter_downloads/`
-- `koushare_downloads/`
+安装版默认按平台保存到 `%USERPROFILE%\Downloads\DouyinGo\<platform>_downloads`。
+如果该目录不可写，sidecar 会依次回退到应用数据目录和系统临时目录；不会把
+用户文件写入 PyInstaller 的临时解包目录。
 
 可以在桌面版设置中修改下载路径，并选择是否保存元数据。YouTube 与 Twitter/X
 可分别设置代理地址，并从 Chrome、Edge、Firefox、Brave 或 Chromium 读取
@@ -335,7 +310,7 @@ AI runner 取消后的进程回收。
 ### v1.0.0
 - 🎉 首次发布
 - ✨ 基础下载功能
-- 💻 PyQt5 GUI 界面
+- 💻 早期 Python 桌面界面
 
 ## ⚠️ 注意事项
 
@@ -350,12 +325,11 @@ AI runner 取消后的进程回收。
 ## 🔮 未来计划
 
 - [ ] 支持更多视频平台（Bilibili、Instagram等）
-- [ ] 添加视频格式转换功能
-- [ ] 实现批量下载和播放列表支持
+- [ ] 扩展视频转码预设
+- [ ] 实现批量链接和播放列表下载
 - [ ] 集成字幕下载功能
-- [ ] 添加下载历史管理
-- [ ] 支持代理设置
-- [ ] 开发命令行版本
+- [ ] 增加应用内自动更新
+- [ ] 验证 macOS 与 Linux 打包流程
 
 ## ⚠️ 免责声明
 
@@ -375,6 +349,8 @@ AI runner 取消后的进程回收。
 
 - [Tauri](https://tauri.app/) - 桌面应用外壳
 - [React](https://react.dev/) - 桌面界面
+- [FastAPI](https://fastapi.tiangolo.com/) - 本地 sidecar API
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - 媒体下载引擎
 - [requests](https://requests.readthedocs.io/) - HTTP 库
 - [ffmpeg](https://ffmpeg.org/) - 视频处理工具
 
@@ -382,8 +358,6 @@ AI runner 取消后的进程回收。
 
 <div align="center">
 
-**如果这个项目对你有帮助，请给一个 ⭐ Star！**
-
-Made with ❤️ by [Your Name]
+**DouyinGo 2.0.2 · React/Tauri + Python sidecar**
 
 </div>
