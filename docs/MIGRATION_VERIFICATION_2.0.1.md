@@ -13,6 +13,8 @@ Branch: `migration/react-tauri-sidecar`
   interruption recovery, and terminal-history deletion.
 - `test_core_functions.py` passes.
 - React/TypeScript production build passes.
+- The Vite development watcher ignores generated Python/Tauri build trees and
+  remains online while `cargo test` rewrites `src-tauri/target` on Windows.
 - Rust sidecar path and occupied-port lifecycle tests pass (2/2).
 - Browser checks pass at 1220x760 and 980x640 with no horizontal overflow,
   toolbar overlap, dialog clipping, or console errors. UI deletion was exercised
