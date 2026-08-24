@@ -24,6 +24,8 @@ from backend.schemas import (
     DownloadedFile,
     JobStatus,
     Platform,
+    SidecarConfig,
+    YtDlpNetworkOptions,
 )
 from backend.url_utils import default_output_dir, extract_url
 from core.ytdlp_media import normalize_media_format
@@ -54,11 +56,16 @@ class DownloadService:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="download")
         self._job_store = job_store or JobStore(jobs_db_path())
         self._jobs = {job.id: job for job in self._job_store.load_jobs()}
+        self._network_options: dict[str, YtDlpNetworkOptions] = {}
         self._cancel_requested: set[str] = set()
         self._lock = threading.RLock()
         self._recover_interrupted_jobs()
 
-    def create_download(self, request: DownloadRequest) -> DownloadJob:
+    def create_download(
+        self,
+        request: DownloadRequest,
+        config: SidecarConfig | None = None,
+    ) -> DownloadJob:
         resolved = extract_url(request.text, request.platform)
         platform = request.platform or resolved.platform
         if platform == Platform.UNKNOWN or not resolved.supported:
@@ -90,6 +97,7 @@ class DownloadService:
 
         with self._lock:
             self._jobs[job.id] = job
+            self._network_options[job.id] = _network_options_for_platform(config, platform)
             self._job_store.save(job)
 
         self._executor.submit(self._run_download, job.id)
@@ -130,6 +138,7 @@ class DownloadService:
             self._job_store.delete(job_id)
             del self._jobs[job_id]
             self._cancel_requested.discard(job_id)
+            self._network_options.pop(job_id, None)
             return True
 
     def clear_terminal_jobs(self) -> int:
@@ -141,6 +150,7 @@ class DownloadService:
             for job_id in terminal_ids:
                 self._jobs.pop(job_id, None)
                 self._cancel_requested.discard(job_id)
+                self._network_options.pop(job_id, None)
             return deleted
 
     def shutdown(self, wait: bool = False) -> None:
@@ -158,12 +168,21 @@ class DownloadService:
         if wait:
             self._job_store.close()
 
-    def resolve_info(self, text: str, platform: Platform | None = None) -> dict[str, Any]:
+    def resolve_info(
+        self,
+        text: str,
+        platform: Platform | None = None,
+        config: SidecarConfig | None = None,
+    ) -> dict[str, Any]:
         resolved = extract_url(text, platform)
         if not resolved.supported:
             return {"resolved": resolved.model_dump(), "info": None}
 
-        downloader = self._create_downloader(resolved.platform, default_output_dir(resolved.platform))
+        downloader = self._create_downloader(
+            resolved.platform,
+            default_output_dir(resolved.platform),
+            _network_options_for_platform(config, resolved.platform),
+        )
         info = downloader.get_video_info(resolved.url)
         if hasattr(info, "to_dict"):
             info = info.to_dict()
@@ -180,7 +199,11 @@ class DownloadService:
                 return
 
             self._update_job(job_id, status=JobStatus.RESOLVING, progress=3, message="Resolving media")
-            downloader = self._create_downloader(job.platform, job.output_dir)
+            downloader = self._create_downloader(
+                job.platform,
+                job.output_dir,
+                self._network_options.get(job_id),
+            )
 
             try:
                 info = downloader.get_video_info(job.url)
@@ -251,8 +274,15 @@ class DownloadService:
         finally:
             with self._lock:
                 self._cancel_requested.discard(job_id)
+                self._network_options.pop(job_id, None)
 
-    def _create_downloader(self, platform: Platform, output_dir: str):
+    def _create_downloader(
+        self,
+        platform: Platform,
+        output_dir: str,
+        network: YtDlpNetworkOptions | None = None,
+    ):
+        network = network or YtDlpNetworkOptions()
         if platform == Platform.DOUYIN:
             return PurePythonExtractor()
         if platform == Platform.YOUTUBE:
@@ -260,9 +290,16 @@ class DownloadService:
                 output_dir,
                 ffmpeg_path=find_ffmpeg(),
                 deno_path=find_deno(),
+                proxy_url=network.proxy_url,
+                cookies_from_browser=network.cookies_from_browser,
             )
         if platform == Platform.TWITTER:
-            return TwitterDownloader(output_dir, ffmpeg_path=find_ffmpeg())
+            return TwitterDownloader(
+                output_dir,
+                ffmpeg_path=find_ffmpeg(),
+                proxy_url=network.proxy_url,
+                cookies_from_browser=network.cookies_from_browser,
+            )
         if platform == Platform.KOUSHARE:
             return KoushareDownloader(output_dir)
         raise ValueError(f"Unsupported platform: {platform}")
@@ -339,6 +376,25 @@ def _normalize_quality(platform: Platform, quality: str) -> str:
     if platform == Platform.KOUSHARE:
         return quality
     return QUALITY_ALIASES.get(quality, quality).lower()
+
+
+def _network_options_for_platform(
+    config: SidecarConfig | None,
+    platform: Platform,
+) -> YtDlpNetworkOptions:
+    if not config:
+        return YtDlpNetworkOptions()
+    if platform == Platform.YOUTUBE:
+        return YtDlpNetworkOptions(
+            proxy_url=config.youtube_proxy_url,
+            cookies_from_browser=config.youtube_cookies_from_browser,
+        )
+    if platform == Platform.TWITTER:
+        return YtDlpNetworkOptions(
+            proxy_url=config.twitter_proxy_url,
+            cookies_from_browser=config.twitter_cookies_from_browser,
+        )
+    return YtDlpNetworkOptions()
 
 
 def _default_title(platform: Platform) -> str:

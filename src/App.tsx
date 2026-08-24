@@ -27,6 +27,7 @@ import {
   createDownload,
   deleteDownload,
   ensureBackend,
+  ensureModelsDirectory,
   getConfig,
   getDownloads,
   getHealth,
@@ -35,7 +36,7 @@ import {
   revealPath,
   updateConfig
 } from "./api";
-import type { AIModelInfo, DownloadJob, JobStatus, Platform, ToolInfo } from "./types";
+import type { AIModelInfo, CookieSource, DownloadJob, JobStatus, Platform, ToolInfo } from "./types";
 
 const platforms: Array<{ id: Platform; label: string; icon: typeof Music2 }> = [
   { id: "douyin", label: "抖音", icon: Music2 },
@@ -67,6 +68,14 @@ const formatOptions = {
   cover: ["JPG"]
 } as const;
 
+const cookieSourceOptions: Array<{ value: CookieSource; label: string }> = [
+  { value: "chrome", label: "Chrome" },
+  { value: "edge", label: "Edge" },
+  { value: "firefox", label: "Firefox" },
+  { value: "brave", label: "Brave" },
+  { value: "chromium", label: "Chromium" }
+];
+
 function App() {
   const [backendUrl, setBackendUrl] = useState("http://127.0.0.1:8765");
   const [backendState, setBackendState] = useState<"starting" | "online" | "offline">("starting");
@@ -84,6 +93,14 @@ function App() {
   const [outputDir, setOutputDir] = useState("");
   const [draftSaveMetadata, setDraftSaveMetadata] = useState(false);
   const [draftOutputDir, setDraftOutputDir] = useState("");
+  const [youtubeProxyUrl, setYoutubeProxyUrl] = useState("");
+  const [youtubeCookies, setYoutubeCookies] = useState<CookieSource | "">("");
+  const [twitterProxyUrl, setTwitterProxyUrl] = useState("");
+  const [twitterCookies, setTwitterCookies] = useState<CookieSource | "">("");
+  const [draftYoutubeProxyUrl, setDraftYoutubeProxyUrl] = useState("");
+  const [draftYoutubeCookies, setDraftYoutubeCookies] = useState<CookieSource | "">("");
+  const [draftTwitterProxyUrl, setDraftTwitterProxyUrl] = useState("");
+  const [draftTwitterCookies, setDraftTwitterCookies] = useState<CookieSource | "">("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string>("");
 
@@ -121,6 +138,10 @@ function App() {
       setSaveMetadata(config.save_metadata);
       setOutputDir(config.output_dir || "");
       setSelectedModel(config.ai_model_id || "");
+      setYoutubeProxyUrl(config.youtube_proxy_url || "");
+      setYoutubeCookies(config.youtube_cookies_from_browser || "");
+      setTwitterProxyUrl(config.twitter_proxy_url || "");
+      setTwitterCookies(config.twitter_cookies_from_browser || "");
       await refresh(url);
     } catch (err) {
       setBackendState("offline");
@@ -196,10 +217,18 @@ function App() {
       await updateConfig(backendUrl, {
         output_dir: draftOutputDir.trim() || null,
         save_metadata: draftSaveMetadata,
-        ai_model_id: selectedModel || null
+        ai_model_id: selectedModel || null,
+        youtube_proxy_url: draftYoutubeProxyUrl.trim() || null,
+        youtube_cookies_from_browser: draftYoutubeCookies || null,
+        twitter_proxy_url: draftTwitterProxyUrl.trim() || null,
+        twitter_cookies_from_browser: draftTwitterCookies || null
       });
       setOutputDir(draftOutputDir.trim());
       setSaveMetadata(draftSaveMetadata);
+      setYoutubeProxyUrl(draftYoutubeProxyUrl.trim());
+      setYoutubeCookies(draftYoutubeCookies);
+      setTwitterProxyUrl(draftTwitterProxyUrl.trim());
+      setTwitterCookies(draftTwitterCookies);
       setSettingsOpen(false);
       setError("");
     } catch (err) {
@@ -210,6 +239,10 @@ function App() {
   function openSettings() {
     setDraftOutputDir(outputDir);
     setDraftSaveMetadata(saveMetadata);
+    setDraftYoutubeProxyUrl(youtubeProxyUrl);
+    setDraftYoutubeCookies(youtubeCookies);
+    setDraftTwitterProxyUrl(twitterProxyUrl);
+    setDraftTwitterCookies(twitterCookies);
     setSettingsOpen(true);
   }
 
@@ -234,6 +267,16 @@ function App() {
   async function clearHistory() {
     try {
       await clearCompletedDownloads(backendUrl);
+      await refresh(backendUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function openModelsDirectory() {
+    try {
+      const result = await ensureModelsDirectory(backendUrl);
+      await revealPath(result.path);
       await refresh(backendUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -383,7 +426,15 @@ function App() {
                 />
               ))}
             </PanelBlock>
-            <PanelBlock title="AI 模型" icon={Bot}>
+            <PanelBlock
+              title="AI 模型"
+              icon={Bot}
+              action={
+                <button className="iconButton" type="button" onClick={() => void openModelsDirectory()} title="打开模型目录">
+                  <FolderOpen size={17} />
+                </button>
+              }
+            >
               {models.map((model) => (
                 <InventoryRow
                   key={model.id}
@@ -421,6 +472,56 @@ function App() {
                 placeholder="使用默认下载目录"
               />
             </label>
+            <fieldset className="settingsGroup">
+              <legend>YouTube</legend>
+              <label className="settingsField">
+                <span>代理 URL</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={draftYoutubeProxyUrl}
+                  onChange={(event) => setDraftYoutubeProxyUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                />
+              </label>
+              <label className="settingsField">
+                <span>浏览器 Cookies</span>
+                <select
+                  value={draftYoutubeCookies}
+                  onChange={(event) => setDraftYoutubeCookies(event.target.value as CookieSource | "")}
+                >
+                  <option value="">不使用</option>
+                  {cookieSourceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
+            <fieldset className="settingsGroup">
+              <legend>Twitter/X</legend>
+              <label className="settingsField">
+                <span>代理 URL</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={draftTwitterProxyUrl}
+                  onChange={(event) => setDraftTwitterProxyUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                />
+              </label>
+              <label className="settingsField">
+                <span>浏览器 Cookies</span>
+                <select
+                  value={draftTwitterCookies}
+                  onChange={(event) => setDraftTwitterCookies(event.target.value as CookieSource | "")}
+                >
+                  <option value="">不使用</option>
+                  {cookieSourceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
             <label className="checkboxField">
               <input
                 type="checkbox"
@@ -504,10 +605,12 @@ function TaskRow({
 function PanelBlock({
   title,
   icon: Icon,
+  action,
   children
 }: {
   title: string;
   icon: typeof Wrench;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -515,6 +618,7 @@ function PanelBlock({
       <div className="panelHeader">
         <Icon size={18} />
         <h2>{title}</h2>
+        {action}
       </div>
       <div className="inventoryList">{children}</div>
     </section>

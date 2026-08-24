@@ -28,8 +28,15 @@ class KoushareDownloader:
     API_BASE = "https://api-core.koushare.com"
     SALT_KEY = "arfw2r4k4rdwrlmchvcu7q61fs"
 
-    def __init__(self, download_dir: str = "koushare_downloads"):
+    def __init__(
+        self,
+        download_dir: str = "koushare_downloads",
+        api_base: Optional[str] = None,
+    ):
         self.download_dir = download_dir
+        self.api_base = (
+            api_base or os.getenv("DOUYINGO_KOUSHARE_API_BASE") or self.API_BASE
+        ).rstrip("/")
         self._access_token = ""
         self._session: Optional[requests.Session] = None
         os.makedirs(download_dir, exist_ok=True)
@@ -250,7 +257,7 @@ class KoushareDownloader:
         raise ValueError(f"无法识别的寇享 URL 格式: {url}")
 
     def _get_live_info(self, live_id: str) -> Dict[str, Any]:
-        url = f"{self.API_BASE}/live/v2/live/{live_id}"
+        url = f"{self.api_base}/live/v2/live/{live_id}"
         response = self._get_session().get(url, headers=self._signed_headers({}, "get"), timeout=15)
         response.raise_for_status()
         data = response.json()
@@ -261,7 +268,7 @@ class KoushareDownloader:
     def _get_live_video_info(self, live_id: str, video_id: str) -> Dict[str, Any]:
         params = {"liveId": int(live_id), "pageNum": 1, "pageSize": 200}
         response = self._get_session().get(
-            f"{self.API_BASE}/live/v1/user/livePlayback/list",
+            f"{self.api_base}/live/v1/user/livePlayback/list",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,
@@ -276,7 +283,7 @@ class KoushareDownloader:
 
     def _get_live_playback(self, live_id: str, video_id: str) -> Dict[str, Any]:
         response = self._get_session().post(
-            f"{self.API_BASE}/live/v2/live/playback/{live_id}",
+            f"{self.api_base}/live/v2/live/playback/{live_id}",
             params={"videoId": video_id},
             json={},
             headers=self._signed_headers({"videoId": video_id}, "post"),
@@ -291,7 +298,7 @@ class KoushareDownloader:
     def _check_video_auth(self, video_id: str) -> str:
         body = {"id": video_id}
         response = self._get_session().post(
-            f"{self.API_BASE}/video/v1/video/checkVideoAuth",
+            f"{self.api_base}/video/v1/video/checkVideoAuth",
             json=body,
             headers=self._signed_headers(body, "post"),
             timeout=15,
@@ -305,7 +312,7 @@ class KoushareDownloader:
     def _get_video_title(self, video_id: str, secret: str) -> str:
         params = {"id": video_id, "secret": secret}
         response = self._get_session().get(
-            f"{self.API_BASE}/video/v1/video/info",
+            f"{self.api_base}/video/v1/video/info",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,
@@ -316,7 +323,7 @@ class KoushareDownloader:
     def _get_video_play_address(self, video_id: str, secret: str) -> Dict[str, Any]:
         params = {"videoId": video_id, "secret": secret}
         response = self._get_session().get(
-            f"{self.API_BASE}/video/v1/video/getVideoPlayAddress",
+            f"{self.api_base}/video/v1/video/getVideoPlayAddress",
             params=params,
             headers=self._signed_headers(params, "get"),
             timeout=15,

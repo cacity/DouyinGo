@@ -98,6 +98,12 @@ export function getModels(baseUrl: string) {
   return apiFetch<AIModelInfo[]>(baseUrl, "/api/models");
 }
 
+export function ensureModelsDirectory(baseUrl: string) {
+  return apiFetch<{ path: string }>(baseUrl, "/api/models/directory", {
+    method: "POST"
+  });
+}
+
 export function getConfig(baseUrl: string) {
   return apiFetch<SidecarConfig>(baseUrl, "/api/config");
 }

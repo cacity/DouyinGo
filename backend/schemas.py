@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Platform(str, Enum):
@@ -39,10 +40,45 @@ class DownloadRequest(BaseModel):
     options: DownloadOptions = Field(default_factory=DownloadOptions)
 
 
+BrowserCookieSource = Literal["chrome", "edge", "firefox", "brave", "chromium"]
+
+
+class YtDlpNetworkOptions(BaseModel):
+    proxy_url: str | None = None
+    cookies_from_browser: BrowserCookieSource | None = None
+
+    @field_validator("proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        if not value:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {
+            "http",
+            "https",
+            "socks4",
+            "socks4a",
+            "socks5",
+            "socks5h",
+        } or not parsed.hostname:
+            raise ValueError("Proxy must be a valid HTTP, HTTPS, SOCKS4, or SOCKS5 URL")
+        return value
+
+
 class SidecarConfig(BaseModel):
     output_dir: str | None = None
     save_metadata: bool = False
     ai_model_id: str | None = None
+    youtube_proxy_url: str | None = None
+    youtube_cookies_from_browser: BrowserCookieSource | None = None
+    twitter_proxy_url: str | None = None
+    twitter_cookies_from_browser: BrowserCookieSource | None = None
+
+    @field_validator("youtube_proxy_url", "twitter_proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, value: str | None) -> str | None:
+        return YtDlpNetworkOptions.validate_proxy_url(value)
 
 
 class ResolveRequest(BaseModel):

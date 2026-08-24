@@ -21,7 +21,13 @@ export interface SidecarConfig {
   output_dir?: string | null;
   save_metadata: boolean;
   ai_model_id?: string | null;
+  youtube_proxy_url?: string | null;
+  youtube_cookies_from_browser?: CookieSource | null;
+  twitter_proxy_url?: string | null;
+  twitter_cookies_from_browser?: CookieSource | null;
 }
+
+export type CookieSource = "chrome" | "edge" | "firefox" | "brave" | "chromium";
 
 export interface DownloadedFile {
   type: string;

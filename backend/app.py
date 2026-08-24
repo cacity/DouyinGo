@@ -10,7 +10,7 @@ from backend import __version__
 from backend.ai_models import configured_model_status, get_model_runner
 from backend.download_service import DownloadService
 from backend.ffmpeg_tools import collect_tool_status
-from backend.runtime_paths import config_path, download_root
+from backend.runtime_paths import config_path, download_root, models_dir
 from backend.schemas import (
     DownloadJob,
     DownloadRequest,
@@ -26,10 +26,15 @@ download_service = DownloadService(download_root())
 app = FastAPI(title="DouyinGo Sidecar", version=__version__)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ],
+    allow_origin_regex=r"^http://(?:127\.0\.0\.1|localhost):\d+$",
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -45,6 +50,10 @@ def health() -> HealthResponse:
 
 @app.get("/api/config", response_model=SidecarConfig)
 def get_config() -> SidecarConfig:
+    return _read_config()
+
+
+def _read_config() -> SidecarConfig:
     path = config_path()
     if not path.exists():
         return SidecarConfig()
@@ -91,10 +100,20 @@ def get_models():
     return configured_model_status()
 
 
+@app.post("/api/models/directory")
+def ensure_models_directory() -> dict[str, str]:
+    path = models_dir()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"path": str(path)}
+
+
 @app.post("/api/resolve")
 def resolve_media(request: ResolveRequest) -> dict:
     try:
-        return download_service.resolve_info(request.text, request.platform)
+        return download_service.resolve_info(request.text, request.platform, _read_config())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -102,7 +121,7 @@ def resolve_media(request: ResolveRequest) -> dict:
 @app.post("/api/downloads", response_model=DownloadJob)
 def create_download(request: DownloadRequest) -> DownloadJob:
     try:
-        return download_service.create_download(request)
+        return download_service.create_download(request, _read_config())
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

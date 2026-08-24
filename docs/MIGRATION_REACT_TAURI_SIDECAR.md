@@ -27,14 +27,28 @@ React/Vite UI
 - `PUT /api/config`
 - `GET /api/tools`
 - `GET /api/models`
+- `POST /api/models/directory`
 - `POST /api/resolve`
 - `POST /api/downloads`
 - `GET /api/downloads`
+- `DELETE /api/downloads`
 - `GET /api/downloads/{job_id}`
+- `DELETE /api/downloads/{job_id}`
 - `POST /api/downloads/{job_id}/cancel`
 
-The current API stores jobs in memory. User defaults are persisted separately in
-`sidecar-config.json`; the legacy PyQt `config.json` is not overwritten.
+Download jobs are persisted in `jobs.sqlite3`. User defaults are persisted
+separately in `sidecar-config.json`; the legacy PyQt `config.json` is not
+overwritten.
+
+The desktop settings expose independent proxy URLs and browser-cookie sources for
+YouTube and Twitter/X. Supported proxy schemes are `http`, `https`, `socks4`,
+`socks4a`, `socks5`, and `socks5h`; supported browsers are Chrome, Edge, Firefox,
+Brave, and Chromium. These credentials are passed to yt-dlp only while a job is
+running. They are never copied into task records, metadata JSON, or
+`jobs.sqlite3`.
+
+CORS is restricted to Tauri origins and loopback Vite development origins. The
+sidecar does not accept browser requests from arbitrary web origins.
 
 ## Media Contract
 
@@ -72,6 +86,10 @@ command placeholders are `{input}`, `{output_dir}`, `{metadata}`, and
 `{model_dir}`. It may print a JSON object with a `downloaded_files` array; every
 reported path must exist inside the task output directory. Commands are launched
 directly without a shell.
+
+The AI panel's folder button creates and reveals the configured model directory.
+This gives model artifacts and `douyingo-model.json` manifests a stable install
+location without exposing arbitrary filesystem creation through the API.
 
 ## Development
 
@@ -153,6 +171,9 @@ Development runs retain the project-relative directories. These locations can be
 overridden with `DOUYINGO_DOWNLOADS_DIR`, `DOUYINGO_DATA_DIR`, and
 `DOUYINGO_MODELS_DIR`.
 
+`DOUYINGO_KOUSHARE_API_BASE` exists only for deterministic test injection. Normal
+source and packaged runs use Koushare's production API endpoint.
+
 Download task history is stored in `jobs.sqlite3` under the same application-data
 folder. The sidecar keeps the newest 500 terminal tasks. A queued, resolving, or
 downloading task found after a sidecar restart is retained and marked cancelled
@@ -174,9 +195,17 @@ Before merging this branch back to `main`, verify:
 8. FFmpeg-dependent Koushare and thumbnail flows work from both source and packaged sidecar.
 9. AI model discovery is pointed at a real model directory through `DOUYINGO_MODELS_DIR` or `models/`.
 
+The FFmpeg/Koushare contract can be exercised without external media or accounts:
+
+```powershell
+npm.cmd run verify:media
+```
+
+This generates a local HLS fixture and drives both the source and packaged
+sidecars through video/MKV, audio/MP3, cover/JPG, metadata, and ffprobe checks.
+
 ## Known Follow-Ups
 
-- Add explicit per-platform cookies/proxy settings for yt-dlp.
 - Ship and validate a concrete model runner for the model family selected by the product owner.
 - Add front-end integration tests after the UI stabilizes.
 - Replace direct stdout logs with structured sidecar events if fine-grained progress streaming is needed.

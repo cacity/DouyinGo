@@ -33,6 +33,8 @@ class YouTubeDownloader:
         download_dir: str = "youtube_downloads",
         ffmpeg_path: Optional[str] = None,
         deno_path: Optional[str] = None,
+        proxy_url: Optional[str] = None,
+        cookies_from_browser: Optional[str] = None,
     ):
         """
         初始化下载器
@@ -41,6 +43,8 @@ class YouTubeDownloader:
         self.download_dir = download_dir
         self.ffmpeg_path = ffmpeg_path
         self.deno_path = deno_path
+        self.proxy_url = proxy_url
+        self.cookies_from_browser = cookies_from_browser
         os.makedirs(download_dir, exist_ok=True)
         self._last_progress = -1  # 记录上次报告的进度
 
@@ -215,6 +219,10 @@ class YouTubeDownloader:
             options['ffmpeg_location'] = self.ffmpeg_path
         if self.deno_path:
             options['js_runtimes'] = {'deno': {'path': self.deno_path}}
+        if self.proxy_url:
+            options['proxy'] = self.proxy_url
+        if self.cookies_from_browser:
+            options['cookiesfrombrowser'] = (self.cookies_from_browser,)
         return options
 
     def _progress_hook(self, d: Dict[str, Any], callback: Optional[Callable] = None):

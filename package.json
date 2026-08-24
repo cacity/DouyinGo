@@ -9,7 +9,8 @@
     "build": "tsc && vite build",
     "tauri:build": "tauri build",
     "backend": "python -m backend.sidecar serve",
-    "package:sidecar": "python scripts/build_sidecar.py"
+    "package:sidecar": "python scripts/build_sidecar.py",
+    "verify:media": "python scripts/verify_media_contract.py --mode both"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

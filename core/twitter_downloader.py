@@ -28,13 +28,21 @@ except ImportError:
 class TwitterDownloader:
     """Twitter/X视频下载器"""
 
-    def __init__(self, download_dir: str = "twitter_downloads", ffmpeg_path: Optional[str] = None):
+    def __init__(
+        self,
+        download_dir: str = "twitter_downloads",
+        ffmpeg_path: Optional[str] = None,
+        proxy_url: Optional[str] = None,
+        cookies_from_browser: Optional[str] = None,
+    ):
         """
         初始化下载器
         :param download_dir: 下载目录
         """
         self.download_dir = download_dir
         self.ffmpeg_path = ffmpeg_path
+        self.proxy_url = proxy_url
+        self.cookies_from_browser = cookies_from_browser
         os.makedirs(download_dir, exist_ok=True)
         self._last_progress = -1  # 记录上次报告的进度
 
@@ -99,6 +107,7 @@ class TwitterDownloader:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            **self._runtime_options(),
         }
 
         try:
@@ -173,8 +182,7 @@ class TwitterDownloader:
             'extract_flat': False,
             **download_options,
         }
-        if self.ffmpeg_path:
-            ydl_opts['ffmpeg_location'] = self.ffmpeg_path
+        ydl_opts.update(self._runtime_options())
         if download_type == "video":
             ydl_opts['format'] = self._get_format_selector(quality)
 
@@ -230,6 +238,16 @@ class TwitterDownloader:
         }
 
         return quality_map.get(quality, "best[ext=mp4]/best")
+
+    def _runtime_options(self) -> Dict[str, Any]:
+        options: Dict[str, Any] = {}
+        if self.ffmpeg_path:
+            options['ffmpeg_location'] = self.ffmpeg_path
+        if self.proxy_url:
+            options['proxy'] = self.proxy_url
+        if self.cookies_from_browser:
+            options['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        return options
 
     def _progress_hook(self, d: Dict[str, Any], callback: Optional[Callable] = None):
         """

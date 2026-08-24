@@ -247,7 +247,10 @@ douyin_app/
 - `twitter_downloads/`
 - `koushare_downloads/`
 
-可以在桌面版设置中修改下载路径，并选择是否保存元数据。配置写入应用数据目录的 `sidecar-config.json`。
+可以在桌面版设置中修改下载路径，并选择是否保存元数据。YouTube 与 Twitter/X
+可分别设置代理地址，并从 Chrome、Edge、Firefox、Brave 或 Chromium 读取
+Cookies。配置写入应用数据目录的 `sidecar-config.json`；代理与 Cookies 来源只在
+任务运行时传给 yt-dlp，不会写入任务历史或下载元数据。
 
 ### 文件命名规则
 
@@ -260,6 +263,11 @@ douyin_app/
 运行核心功能测试：
 ```bash
 python test_core_functions.py
+```
+
+使用本地 HLS 测试源验证源代码与打包 sidecar 的 Koushare/FFmpeg 输出契约：
+```bash
+npm.cmd run verify:media
 ```
 
 测试内容：
@@ -275,6 +283,8 @@ python test_core_functions.py
 - 🎵 下载类型与格式真实生效，新增音频、封面和元数据输出
 - 🤖 新增可验证的本地 AI 模型运行器清单
 - ⚙️ 新增 sidecar 设置持久化与响应式桌面布局修复
+- 🌐 新增 YouTube 与 Twitter/X 独立代理及浏览器 Cookies 设置
+- ✅ 新增本地 HLS 媒体契约测试，覆盖打包 sidecar 的 MKV、MP3 与 JPG 输出
 
 ### v2.0.0
 - ✨ 新增YouTube视频下载支持

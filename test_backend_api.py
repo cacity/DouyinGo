@@ -20,11 +20,19 @@ from backend.job_store import JobStore
 from backend.media_postprocess import append_metadata_file, transform_downloaded_media
 from backend import runtime_paths
 from backend.runtime_paths import data_root, download_root, jobs_db_path
-from backend.schemas import DownloadJob, DownloadOptions, DownloadRequest, JobStatus, Platform
+from backend.schemas import (
+    DownloadJob,
+    DownloadOptions,
+    DownloadRequest,
+    JobStatus,
+    Platform,
+    SidecarConfig,
+)
 from backend.sidecar import build_parser, process_is_running
 from backend.url_utils import extract_url
 from core.ytdlp_media import media_options, normalize_media_format
 from core.youtube_downloader import YouTubeDownloader
+from core.twitter_downloader import TwitterDownloader
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -69,10 +77,45 @@ def test_api_health_and_inventory():
     if not isinstance(models.json(), list):
         raise AssertionError("models response must be a list")
 
+    with tempfile.TemporaryDirectory() as temp_dir:
+        model_path = Path(temp_dir) / "models"
+        with patch("backend.app.models_dir", return_value=model_path):
+            model_directory = client.post("/api/models/directory")
+        assert_equal(model_directory.status_code, 200, "model directory status")
+        assert_equal(model_directory.json()["path"], str(model_path), "model directory path")
+        assert_equal(model_path.is_dir(), True, "model directory created")
+
     downloads = client.get("/api/downloads")
     assert_equal(downloads.status_code, 200, "downloads status")
     if not isinstance(downloads.json(), list):
         raise AssertionError("downloads response must be a list")
+
+    allowed_preflight = client.options(
+        "/health",
+        headers={
+            "Origin": "http://127.0.0.1:1420",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert_equal(allowed_preflight.status_code, 200, "local CORS preflight")
+    assert_equal(
+        allowed_preflight.headers.get("access-control-allow-origin"),
+        "http://127.0.0.1:1420",
+        "local CORS origin",
+    )
+    denied_preflight = client.options(
+        "/health",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert_equal(denied_preflight.status_code, 400, "external CORS preflight")
+    assert_equal(
+        denied_preflight.headers.get("access-control-allow-origin"),
+        None,
+        "external CORS origin",
+    )
 
 
 def test_invalid_download_request():
@@ -128,6 +171,31 @@ def test_youtube_packaged_runtime_options():
             raise AssertionError("best quality must combine the best video and audio streams")
         if "height<=1080" not in downloader._get_format_selector("1080p"):
             raise AssertionError("1080p quality must apply a height limit")
+
+        networked = YouTubeDownloader(
+            temp_dir,
+            ffmpeg_path="ffmpeg",
+            deno_path="deno",
+            proxy_url="socks5://127.0.0.1:1080",
+            cookies_from_browser="edge",
+        )
+        network_options = networked._runtime_options()
+        assert_equal(network_options["proxy"], "socks5://127.0.0.1:1080", "YouTube proxy")
+        assert_equal(network_options["cookiesfrombrowser"], ("edge",), "YouTube cookies")
+
+        twitter = TwitterDownloader(
+            temp_dir,
+            ffmpeg_path="ffmpeg",
+            proxy_url="http://127.0.0.1:7890",
+            cookies_from_browser="firefox",
+        )
+        twitter_options = twitter._runtime_options()
+        assert_equal(twitter_options["proxy"], "http://127.0.0.1:7890", "Twitter proxy")
+        assert_equal(
+            twitter_options["cookiesfrombrowser"],
+            ("firefox",),
+            "Twitter cookies",
+        )
 
 
 def test_runtime_path_overrides():
@@ -201,6 +269,10 @@ def test_sidecar_config_api():
                     "output_dir": str(output_dir),
                     "save_metadata": True,
                     "ai_model_id": None,
+                    "youtube_proxy_url": "socks5://127.0.0.1:1080",
+                    "youtube_cookies_from_browser": "edge",
+                    "twitter_proxy_url": "http://127.0.0.1:7890",
+                    "twitter_cookies_from_browser": "firefox",
                 },
             )
             assert_equal(response.status_code, 200, "config update status")
@@ -208,6 +280,19 @@ def test_sidecar_config_api():
             assert_equal(output_dir.is_dir(), True, "configured output exists")
             loaded = client.get("/api/config")
             assert_equal(loaded.json()["save_metadata"], True, "config reload")
+            assert_equal(
+                loaded.json()["youtube_cookies_from_browser"],
+                "edge",
+                "YouTube cookie source reload",
+            )
+
+            invalid_proxy = client.put(
+                "/api/config",
+                json={
+                    "youtube_proxy_url": "not-a-proxy",
+                },
+            )
+            assert_equal(invalid_proxy.status_code, 422, "invalid proxy status")
 
 
 def test_media_postprocess_and_metadata():
@@ -351,6 +436,39 @@ def test_job_history_deletion_contract():
         service.shutdown(wait=True)
 
 
+def test_network_options_are_transient():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        service = DownloadService(
+            root,
+            max_workers=1,
+            job_store=JobStore(root / "jobs.sqlite3"),
+        )
+        request = DownloadRequest(
+            text="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            platform=Platform.YOUTUBE,
+            options=DownloadOptions(output_dir=str(root / "downloads")),
+        )
+        config = SidecarConfig(
+            youtube_proxy_url="socks5://127.0.0.1:1080",
+            youtube_cookies_from_browser="chrome",
+        )
+        with patch.object(service._executor, "submit", return_value=None):
+            job = service.create_download(request, config)
+
+        network = service._network_options[job.id]
+        assert_equal(network.proxy_url, "socks5://127.0.0.1:1080", "transient proxy")
+        assert_equal(network.cookies_from_browser, "chrome", "transient cookies")
+        serialized = job.model_dump_json()
+        if "socks5" in serialized or "cookies" in serialized:
+            raise AssertionError("network credentials must not be persisted in DownloadJob")
+
+        service.cancel_job(job.id)
+        service.delete_job(job.id)
+        assert_equal(job.id in service._network_options, False, "transient network cleanup")
+        service.shutdown(wait=True)
+
+
 def _test_job(output_dir: Path, options: DownloadOptions) -> DownloadJob:
     now = datetime.now(timezone.utc)
     return DownloadJob(
@@ -381,6 +499,7 @@ def main():
     test_ai_model_manifest_execution()
     test_job_history_persistence_and_recovery()
     test_job_history_deletion_contract()
+    test_network_options_are_transient()
     print("Sidecar API smoke tests passed.")
 
 
