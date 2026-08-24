@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { AIModelInfo, DownloadJob, Platform, ToolInfo } from "./types";
 
 export async function ensureBackend(): Promise<string> {
@@ -7,11 +7,16 @@ export async function ensureBackend(): Promise<string> {
     return configured.replace(/\/$/, "");
   }
 
+  if (!isTauri()) {
+    return "http://127.0.0.1:8765";
+  }
+
   try {
     const url = await invoke<string>("ensure_backend");
     return url.replace(/\/$/, "");
-  } catch {
-    return "http://127.0.0.1:8765";
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Sidecar 启动失败：${detail}`);
   }
 }
 

@@ -66,7 +66,11 @@ Run Tauri in development:
 npm.cmd run tauri:dev
 ```
 
-During early development, if the PyInstaller sidecar has not been built yet, the React UI falls back to `http://127.0.0.1:8765`. Start the backend manually with `python -m backend.sidecar serve`.
+During early development, if the PyInstaller sidecar has not been built yet, the React UI uses `http://127.0.0.1:8765`. Start the backend manually with `python -m backend.sidecar serve`.
+
+The packaged desktop app prefers port `8765`. If another local service already owns that port, Tauri selects an available loopback port, starts the sidecar there, and returns the actual URL to React.
+
+Tauri also passes its process ID to the packaged sidecar. A watchdog exits the Python service when the owning desktop process disappears, including crash and forced-close cases where PyInstaller's child process would otherwise be orphaned.
 
 ## Packaging
 

@@ -75,49 +75,55 @@ function App() {
     [jobs]
   );
 
-  const refresh = useCallback(
-    async (base = backendUrl) => {
-      try {
-        const [health, downloads, toolList, modelList] = await Promise.all([
-          getHealth(base),
-          getDownloads(base),
-          getTools(base),
-          getModels(base)
-        ]);
-        setBackendState("online");
-        setBackendVersion(health.version);
-        setJobs(downloads);
-        setTools(toolList);
-        setModels(modelList);
-        setError("");
-      } catch (err) {
-        setBackendState("offline");
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [backendUrl]
-  );
+  const refresh = useCallback(async (base: string) => {
+    try {
+      const [health, downloads, toolList, modelList] = await Promise.all([
+        getHealth(base),
+        getDownloads(base),
+        getTools(base),
+        getModels(base)
+      ]);
+      setBackendState("online");
+      setBackendVersion(health.version);
+      setJobs(downloads);
+      setTools(toolList);
+      setModels(modelList);
+      setError("");
+    } catch (err) {
+      setBackendState("offline");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
-  useEffect(() => {
-    let disposed = false;
-    ensureBackend().then((url) => {
-      if (disposed) {
-        return;
-      }
+  const connectBackend = useCallback(async () => {
+    setBackendState("starting");
+    try {
+      const url = await ensureBackend();
       setBackendUrl(url);
-      refresh(url);
-    });
-    return () => {
-      disposed = true;
-    };
+      await refresh(url);
+    } catch (err) {
+      setBackendState("offline");
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }, [refresh]);
 
   useEffect(() => {
+    void connectBackend();
+  }, [connectBackend]);
+
+  useEffect(() => {
+    if (backendState === "starting") {
+      return undefined;
+    }
     const timer = window.setInterval(() => {
-      refresh().catch(() => undefined);
+      if (backendState === "offline") {
+        void connectBackend();
+      } else {
+        void refresh(backendUrl);
+      }
     }, activeJobs > 0 ? 1000 : 3000);
     return () => window.clearInterval(timer);
-  }, [activeJobs, refresh]);
+  }, [activeJobs, backendState, backendUrl, connectBackend, refresh]);
 
   useEffect(() => {
     const options = qualityOptions[platform];
@@ -153,7 +159,7 @@ function App() {
         }
       });
       setInput("");
-      await refresh();
+      await refresh(backendUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -162,7 +168,7 @@ function App() {
   async function cancel(jobId: string) {
     try {
       await cancelDownload(backendUrl, jobId);
-      await refresh();
+      await refresh(backendUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -242,8 +248,20 @@ function App() {
             </button>
           </form>
           <div className={`backendPill ${backendState}`}>
-            {backendState === "online" ? <CircleCheck size={16} /> : <CircleAlert size={16} />}
-            <span>{backendState === "online" ? `Sidecar ${backendVersion}` : "Sidecar 离线"}</span>
+            {backendState === "online" ? (
+              <CircleCheck size={16} />
+            ) : backendState === "starting" ? (
+              <LoaderCircle className="spin" size={16} />
+            ) : (
+              <CircleAlert size={16} />
+            )}
+            <span>
+              {backendState === "online"
+                ? `Sidecar ${backendVersion}`
+                : backendState === "starting"
+                  ? "Sidecar 启动中"
+                  : "Sidecar 离线"}
+            </span>
           </div>
         </header>
 
@@ -258,7 +276,7 @@ function App() {
           <section className="taskSection">
             <div className="sectionHeader">
               <h1>下载任务</h1>
-              <button className="iconButton" type="button" onClick={() => refresh()} title="刷新">
+              <button className="iconButton" type="button" onClick={() => void connectBackend()} title="刷新">
                 <RefreshCw size={18} />
               </button>
             </div>

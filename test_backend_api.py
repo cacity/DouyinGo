@@ -3,12 +3,14 @@
 
 """Sidecar API smoke tests that do not perform network downloads."""
 
+import os
 import sys
 
 from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.schemas import Platform
+from backend.sidecar import build_parser, process_is_running
 from backend.url_utils import extract_url
 
 
@@ -65,10 +67,20 @@ def test_invalid_download_request():
     assert_equal(response.status_code, 400, "invalid download status")
 
 
+def test_sidecar_lifecycle_arguments():
+    args = build_parser().parse_args(
+        ["serve", "--host", "127.0.0.1", "--port", "12345", "--parent-pid", str(os.getpid())]
+    )
+    assert_equal(args.port, 12345, "sidecar port argument")
+    assert_equal(args.parent_pid, os.getpid(), "sidecar parent pid argument")
+    assert_equal(process_is_running(os.getpid()), True, "current process is running")
+
+
 def main():
     test_url_resolution()
     test_api_health_and_inventory()
     test_invalid_download_request()
+    test_sidecar_lifecycle_arguments()
     print("Sidecar API smoke tests passed.")
 
 

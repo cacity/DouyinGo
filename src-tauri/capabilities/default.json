@@ -9,13 +9,17 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/douyingo-sidecar",
+          "name": "douyingo-sidecar",
           "sidecar": true,
           "args": [
             "serve",
             "--host",
             "127.0.0.1",
             "--port",
+            {
+              "validator": "\\d+"
+            },
+            "--parent-pid",
             {
               "validator": "\\d+"
             }
