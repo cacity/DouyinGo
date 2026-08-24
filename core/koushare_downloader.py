@@ -9,10 +9,12 @@ import hashlib
 import json
 import os
 import platform
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -504,9 +506,35 @@ class KoushareDownloader:
         )
 
         out_time_us = 0
-        if process.stdout is not None:
-            for line in process.stdout:
-                line = line.strip()
+        last_percent = 30
+        last_message = "正在下载视频流..."
+        output_queue: queue.Queue[str | None] = queue.Queue()
+
+        def read_progress() -> None:
+            try:
+                if process.stdout is not None:
+                    for output_line in process.stdout:
+                        output_queue.put(output_line)
+            finally:
+                output_queue.put(None)
+
+        reader = threading.Thread(target=read_progress, name="ffmpeg-progress", daemon=True)
+        reader.start()
+        next_heartbeat = time.monotonic() + 1
+        try:
+            while True:
+                try:
+                    queued_line = output_queue.get(timeout=0.25)
+                except queue.Empty:
+                    if process.poll() is not None and not reader.is_alive():
+                        break
+                    if time.monotonic() >= next_heartbeat:
+                        self._report_progress(progress_callback, last_percent, last_message)
+                        next_heartbeat = time.monotonic() + 1
+                    continue
+                if queued_line is None:
+                    break
+                line = queued_line.strip()
                 if line.startswith("out_time_us="):
                     try:
                         out_time_us = int(line.split("=", 1)[1])
@@ -515,17 +543,44 @@ class KoushareDownloader:
                 elif line.startswith("progress=") and total_duration > 0:
                     elapsed_seconds = out_time_us / 1_000_000
                     percent = int(30 + min(elapsed_seconds / total_duration, 1.0) * 67)
+                    last_percent = percent
+                    last_message = (
+                        f"下载中 {self._format_time(elapsed_seconds)} / "
+                        f"{self._format_time(total_duration)}"
+                    )
                     self._report_progress(
                         progress_callback,
                         percent,
-                        f"下载中 {self._format_time(elapsed_seconds)} / {self._format_time(total_duration)}",
+                        last_message,
                     )
 
-        process.wait()
-        if process.returncode != 0:
-            raise RuntimeError(f"ffmpeg 下载失败（returncode={process.returncode}）")
+            process.wait()
+            if process.returncode != 0:
+                raise RuntimeError(f"ffmpeg 下载失败（returncode={process.returncode}）")
+        except BaseException:
+            self._stop_ffmpeg(process)
+            try:
+                os.unlink(output_path)
+            except FileNotFoundError:
+                pass
+            raise
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+            reader.join(timeout=1)
 
         self._report_progress(progress_callback, 100, "下载完成")
+
+    @staticmethod
+    def _stop_ffmpeg(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
     def _format_time(self, seconds: float) -> str:
         total_seconds = int(seconds) if seconds else 0

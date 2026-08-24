@@ -233,6 +233,14 @@ class DownloadService:
                 )
 
             result = self._download_with_platform_downloader(downloader, job, progress_callback)
+            if self._is_cancelled(job_id):
+                self._update_job(
+                    job_id,
+                    status=JobStatus.CANCELLED,
+                    message="Cancelled",
+                    error=None,
+                )
+                return
             if result.get("success"):
                 if job.platform in {Platform.DOUYIN, Platform.KOUSHARE}:
                     result = transform_downloaded_media(
@@ -250,6 +258,14 @@ class DownloadService:
                         result,
                         progress_callback,
                     )
+                if self._is_cancelled(job_id):
+                    self._update_job(
+                        job_id,
+                        status=JobStatus.CANCELLED,
+                        message="Cancelled",
+                        error=None,
+                    )
+                    return
                 files = [_normalize_downloaded_file(item) for item in result.get("downloaded_files", [])]
                 title = result.get("title") or job.title
                 self._update_job(
@@ -262,15 +278,35 @@ class DownloadService:
                     error=None,
                 )
             else:
+                if self._is_cancelled(job_id):
+                    self._update_job(
+                        job_id,
+                        status=JobStatus.CANCELLED,
+                        message="Cancelled",
+                        error=None,
+                    )
+                else:
+                    self._update_job(
+                        job_id,
+                        status=JobStatus.ERROR,
+                        message="Download failed",
+                        error=result.get("error", "Unknown error"),
+                    )
+        except Exception as exc:
+            if self._is_cancelled(job_id):
+                self._update_job(
+                    job_id,
+                    status=JobStatus.CANCELLED,
+                    message="Cancelled",
+                    error=None,
+                )
+            else:
                 self._update_job(
                     job_id,
                     status=JobStatus.ERROR,
-                    message="Download failed",
-                    error=result.get("error", "Unknown error"),
+                    message=str(exc),
+                    error=str(exc),
                 )
-        except Exception as exc:
-            status = JobStatus.CANCELLED if self._is_cancelled(job_id) else JobStatus.ERROR
-            self._update_job(job_id, status=status, message=str(exc), error=str(exc))
         finally:
             with self._lock:
                 self._cancel_requested.discard(job_id)

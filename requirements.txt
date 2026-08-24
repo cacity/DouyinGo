@@ -1,9 +1,6 @@
 # Douyin App - 抖音视频下载器依赖包
 # Python 3.10+ required
 
-# GUI Framework - PyQt5
-PyQt5>=5.15.0,<6.0.0
-
 # Python sidecar API
 fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.34.0,<1.0.0

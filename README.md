@@ -1,11 +1,11 @@
-# VideoGo
+# DouyinGo
 
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
+![Platform](https://img.shields.io/badge/desktop-Windows%20x64-lightgrey.svg)
 
 **多平台视频下载工具 | Multi-Platform Video Downloader**
 
@@ -43,8 +43,8 @@
 ### 🎨 界面特性
 - **🎯 平台切换** - 直观的平台选择界面
 - **📊 实时进度** - 下载进度实时显示
-- **🖼️ 视频预览** - 自动生成视频缩略图
-- **📁 批量下载** - 支持多个视频同时下载
+- **📚 持久任务历史** - sidecar 重启后保留已结束任务，并安全恢复中断状态
+- **📁 多任务下载** - 支持多个下载任务并发执行
 - **💻 现代 UI** - 简洁美观的图形界面
 - **🚀 本地 sidecar** - 下载与媒体处理均在本机 Python sidecar 中完成
 
@@ -66,26 +66,32 @@
 - **本地后端**: FastAPI + Python sidecar
 - **下载引擎**: yt-dlp + 平台定制下载器
 - **HTTP 请求**: requests + httpx
-- **视频处理**: ffmpeg (用于缩略图提取)
+- **视频处理**: FFmpeg + ffprobe
 - **日志系统**: loguru
 - **正则解析**: Python re
 
 ## 📦 安装使用
 
-### 环境要求
+### Windows 安装包
 
+发布版安装包已经包含 Python sidecar、FFmpeg、ffprobe、yt-dlp、Deno 和
+`yt-dlp-ejs`，终端用户不需要单独安装 Python 或媒体工具。
+
+### 源码开发要求
+
+- Windows 10/11 x64
 - Python 3.10 或更高版本
-- Node.js 与 Rust（仅源码开发和打包需要）
-- Windows / macOS / Linux
-- FFmpeg (用于视频处理)
+- Node.js 20 或更高版本
+- Rust stable
+- FFmpeg 与 ffprobe（打包时强制检查并捆绑）
 
-### 快速开始
+### 快速开始（源码）
 
 1. **克隆项目**
 
 ```bash
 git clone <项目地址>
-cd douyin_app
+cd DouyinGo
 ```
 
 2. **安装依赖**
@@ -94,13 +100,10 @@ cd douyin_app
 pip install -r requirements.txt
 ```
 
-3. **安装 FFmpeg**
+3. **安装 FFmpeg 与 ffprobe**
 
-用于视频缩略图提取和视频处理：
-
-- **Windows**: 从 [ffmpeg.org](https://ffmpeg.org/download.html) 下载并添加到 PATH
-- **macOS**: `brew install ffmpeg`
-- **Linux**: `sudo apt-get install ffmpeg`
+从 [ffmpeg.org](https://ffmpeg.org/download.html) 获取同一发行版的 `ffmpeg.exe`
+和 `ffprobe.exe`，并加入 `PATH`。仓库根目录的 `ffmpeg.exe` 也可被构建脚本发现。
 
 4. **安装前端依赖**
 
@@ -115,7 +118,16 @@ npm run package:sidecar
 npm run tauri:dev
 ```
 
-旧 PyQt 入口 `python main.py` 暂时保留用于迁移对照，不是新桌面版入口。
+生成完整 NSIS 安装包：
+
+```bash
+npm run tauri:build
+```
+
+该命令会先重新打包 Python sidecar，避免把旧后端误装进新桌面版本。
+
+旧 PyQt 入口 `python main.py` 仅保留用于迁移对照，不是新桌面版入口。需要
+运行旧入口时，另行安装 `requirements-legacy.txt`。
 
 ## 📖 使用说明
 
@@ -180,16 +192,19 @@ npm run tauri:dev
 ## 📁 项目结构
 
 ```
-douyin_app/
+DouyinGo/
 ├── main.py                      # 旧 PyQt 对照入口
 ├── src/                         # React 桌面界面
 ├── src-tauri/                   # Tauri 外壳与 sidecar 生命周期
 ├── backend/                     # FastAPI sidecar API 与任务服务
 ├── scripts/build_sidecar.py     # PyInstaller sidecar 打包
-├── requirements.txt             # 依赖包列表
-├── README.md                   # 项目说明文档
-├── test_core_functions.py      # 核心功能测试
-├── core/                       # 核心下载模块
+├── scripts/verify_media_contract.py # 打包媒体与取消契约
+├── requirements.txt             # sidecar 与构建依赖
+├── requirements-legacy.txt      # 可选旧 PyQt 对照依赖
+├── README.md                    # 项目说明文档
+├── test_backend_api.py          # sidecar API 与生命周期测试
+├── test_core_functions.py       # 核心功能测试
+├── core/                        # 核心下载模块
 │   ├── __init__.py
 │   ├── downloader.py           # 抖音下载器
 │   ├── pure_python_extractor.py # 抖音解析器
@@ -197,7 +212,7 @@ douyin_app/
 │   ├── youtube_downloader.py   # YouTube下载器
 │   ├── twitter_downloader.py   # Twitter下载器
 │   └── koushare_downloader.py  # 寇享下载器
-├── ui/                         # 用户界面模块
+├── ui/                         # 旧 PyQt 对照界面
 │   ├── __init__.py
 │   ├── main_window.py          # 主窗口
 │   ├── sidebar.py              # 侧边栏
@@ -263,12 +278,16 @@ Cookies。配置写入应用数据目录的 `sidecar-config.json`；代理与 Co
 运行核心功能测试：
 ```bash
 python test_core_functions.py
+python test_backend_api.py
 ```
 
 使用本地 HLS 测试源验证源代码与打包 sidecar 的 Koushare/FFmpeg 输出契约：
 ```bash
 npm.cmd run verify:media
 ```
+
+媒体契约同时验证 MKV/MP3/JPG 输出、活动 HLS 取消、AI manifest runner 和
+AI runner 取消后的进程回收。
 
 测试内容：
 - URL识别功能
@@ -285,6 +304,8 @@ npm.cmd run verify:media
 - ⚙️ 新增 sidecar 设置持久化与响应式桌面布局修复
 - 🌐 新增 YouTube 与 Twitter/X 独立代理及浏览器 Cookies 设置
 - ✅ 新增本地 HLS 媒体契约测试，覆盖打包 sidecar 的 MKV、MP3 与 JPG 输出
+- 🛑 修复活动下载、FFmpeg 后处理和 AI runner 取消时的状态与进程回收
+- 🔒 启用 Tauri CSP，并让桌面构建强制重建完整 sidecar 工具链
 
 ### v2.0.0
 - ✨ 新增YouTube视频下载支持

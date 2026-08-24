@@ -12,12 +12,16 @@ Branch: `migration/react-tauri-sidecar`
   AI manifest discovery, AI runner execution, SQLite task persistence, restart
   interruption recovery, terminal-history deletion, loopback-only CORS,
   model-directory creation, proxy validation, browser-cookie selection, and
-  transient network-option cleanup.
+  transient network-option cleanup. Active cancellation remains `cancelled`,
+  clears its error field, and promptly stops FFmpeg post-processing and AI runner
+  process trees; AI timeout also stops its runner process.
 - `test_core_functions.py` passes.
 - React/TypeScript production build passes.
 - The Vite development watcher ignores generated Python/Tauri build trees and
   remains online while `cargo test` rewrites `src-tauri/target` on Windows.
 - Rust sidecar path and occupied-port lifecycle tests pass (2/2).
+- The production Tauri CSP permits only application assets, IPC, and loopback
+  sidecar connections. The release WebView renders normally with the CSP active.
 - Browser checks pass at 1220x760 and 980x640 with no horizontal overflow,
   toolbar overlap, dialog clipping, or console errors. UI deletion was exercised
   against a recovered SQLite fixture and removed the API/database record without
@@ -38,19 +42,25 @@ Branch: `migration/react-tauri-sidecar`
   packaged sidecars: MKV is 172,488 bytes with audio/video streams, MP3 is 10,083
   bytes with an audio stream, and JPG is 11,304 bytes with an image stream.
   Metadata output is required for every case, and the packaged run confirms
-  bundled FFmpeg, ffprobe, and Deno.
+  bundled FFmpeg, ffprobe, and Deno. Both modes also cancel an active slow HLS
+  transfer as `cancelled`, remove the partial MP4, execute an AI manifest runner,
+  and cancel a slow AI runner with verified process cleanup.
 - A release-desktop smoke test passes while port 8765 is occupied: Tauri selects
   port 8563, starts sidecar 2.0.1, reports bundled tools, and automatically stops
   the packaged sidecar after the desktop process exits.
-- NSIS installer build succeeds.
+- A second release smoke test verifies the CSP-enabled WebView, online sidecar,
+  complete tool inventory, normal window close, and full PyInstaller process-tree
+  shutdown.
+- The canonical `npm.cmd run tauri:build` command first rebuilds the sidecar,
+  requires FFmpeg and ffprobe, then produces the NSIS installer successfully.
 
 ## Artifacts
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/bundle/nsis/DouyinGo_2.0.1_x64-setup.exe` | 149,346,279 | `01D15100C70F2DF660184D1B00A2D3C710A56CACC68D7A935AE01349E6B87DD0` |
-| `src-tauri/target/release/douyingo_desktop.exe` | 11,104,768 | `5995ED36D9C5A72DEED3D19CFC24D851606713016186BA2B9D81F654851DBD73` |
-| `src-tauri/binaries/douyingo-sidecar-x86_64-pc-windows-msvc.exe` | 147,026,407 | `C3CC698EE283357A594CF8A4F1739EB05AA17881B330C7F168CC113AD67BB9F3` |
+| `src-tauri/target/release/bundle/nsis/DouyinGo_2.0.1_x64-setup.exe` | 149,351,479 | `8E50CE880DC046F678628D21880A830758255DF3EA1E48953463038A8EBEE5F2` |
+| `src-tauri/target/release/douyingo_desktop.exe` | 11,078,144 | `A464C08C46A52249A09BFB33F8812224FB96737E800656E87CA851F9ED574319` |
+| `src-tauri/binaries/douyingo-sidecar-x86_64-pc-windows-msvc.exe` | 147,031,465 | `EAE5B48CE29BE132BB39FF32A2B277A2C66C31255E6E23BA8DE6A296A2657D6A` |
 
 ## Merge Gates Still Open
 

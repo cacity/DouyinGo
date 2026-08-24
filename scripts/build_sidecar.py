@@ -95,12 +95,24 @@ def build_sidecar() -> Path:
 
     extension = ".exe" if platform.system() == "Windows" else ""
     separator = ";" if platform.system() == "Windows" else ":"
-    binary_paths = [deno_binary()]
-    for executable_path in (find_ffmpeg(), find_ffprobe()):
-        if executable_path:
-            path = Path(executable_path).resolve()
-            if path not in binary_paths:
-                binary_paths.append(path)
+    ffmpeg_path = find_ffmpeg()
+    ffprobe_path = find_ffprobe()
+    missing = [
+        name
+        for name, executable_path in (("ffmpeg", ffmpeg_path), ("ffprobe", ffprobe_path))
+        if not executable_path
+    ]
+    if missing:
+        raise SystemExit(
+            "Sidecar packaging requires these media tools: " + ", ".join(missing)
+        )
+
+    binary_paths = [
+        deno_binary(),
+        Path(ffmpeg_path).resolve(),
+        Path(ffprobe_path).resolve(),
+    ]
+    binary_paths = list(dict.fromkeys(binary_paths))
 
     add_binaries: list[str] = []
     for binary_path in binary_paths:

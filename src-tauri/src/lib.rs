@@ -31,6 +31,24 @@ fn sidecar_state() -> &'static Mutex<SidecarState> {
     SIDECAR_STATE.get_or_init(|| Mutex::new(SidecarState::default()))
 }
 
+fn stop_sidecar(child: CommandChild) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let status = Command::new("taskkill")
+            .args(["/PID", &child.pid().to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        if status.is_ok_and(|status| status.success()) {
+            return;
+        }
+    }
+
+    let _ = child.kill();
+}
+
 fn backend_url(port: u16) -> String {
     format!("http://{BACKEND_HOST}:{port}")
 }
@@ -106,7 +124,7 @@ async fn ensure_backend(app: AppHandle) -> Result<String, String> {
 
         if state.child.is_some() && state.port.is_none() {
             if let Some(child) = state.child.take() {
-                let _ = child.kill();
+                stop_sidecar(child);
             }
         }
 
@@ -196,7 +214,7 @@ async fn ensure_backend(app: AppHandle) -> Result<String, String> {
         .clone()
         .unwrap_or_else(|| "health check timed out".to_string());
     if let Some(child) = state.child.take() {
-        let _ = child.kill();
+        stop_sidecar(child);
     }
     state.port = None;
     Err(format!("sidecar did not become ready: {detail}"))
@@ -262,7 +280,7 @@ pub fn run() {
             app_handle.listen("tauri://close-requested", |_| {
                 if let Ok(mut state) = sidecar_state().lock() {
                     if let Some(child) = state.child.take() {
-                        let _ = child.kill();
+                        stop_sidecar(child);
                     }
                     state.port = None;
                 }

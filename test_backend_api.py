@@ -7,6 +7,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -17,7 +19,7 @@ from backend.app import app
 from backend.ai_models import discover_ai_models, run_ai_postprocess
 from backend.download_service import DownloadService
 from backend.job_store import JobStore
-from backend.media_postprocess import append_metadata_file, transform_downloaded_media
+from backend.media_postprocess import _run_ffmpeg, append_metadata_file, transform_downloaded_media
 from backend import runtime_paths
 from backend.runtime_paths import data_root, download_root, jobs_db_path
 from backend.schemas import (
@@ -308,11 +310,10 @@ def test_media_postprocess_and_metadata():
             "downloaded_files": [{"type": "video", "path": str(source), "size": source.stat().st_size}],
         }
 
-        def fake_ffmpeg(command, **_kwargs):
+        def fake_ffmpeg(command, _progress_callback=None):
             Path(command[-1]).write_bytes(b"audio")
-            return type("Completed", (), {"returncode": 0, "stderr": ""})()
 
-        with patch("backend.media_postprocess.subprocess.run", side_effect=fake_ffmpeg):
+        with patch("backend.media_postprocess._run_ffmpeg", side_effect=fake_ffmpeg):
             transformed = transform_downloaded_media(result, job, "ffmpeg", lambda *_args: None)
         audio = transformed["downloaded_files"][0]
         assert_equal(audio["type"], "audio", "postprocess output type")
@@ -324,6 +325,26 @@ def test_media_postprocess_and_metadata():
         payload = json.loads(Path(metadata["path"]).read_text(encoding="utf-8"))
         assert_equal(payload["platform"], "youtube", "metadata platform")
         assert_equal(payload["options"]["download_type"], "audio", "metadata options")
+
+        callback_count = 0
+
+        def cancel_ffmpeg(*_args):
+            nonlocal callback_count
+            callback_count += 1
+            raise RuntimeError("cancel post-processing")
+
+        started = time.monotonic()
+        try:
+            _run_ffmpeg(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                cancel_ffmpeg,
+            )
+            raise AssertionError("FFmpeg cancellation did not interrupt the process")
+        except RuntimeError as exc:
+            assert_equal(str(exc), "cancel post-processing", "FFmpeg cancellation error")
+        if time.monotonic() - started >= 8:
+            raise AssertionError("FFmpeg cancellation did not stop promptly")
+        assert_equal(callback_count, 1, "FFmpeg cancellation heartbeat")
 
 
 def test_ai_model_manifest_execution():
@@ -365,6 +386,79 @@ def test_ai_model_manifest_execution():
             processed = run_ai_postprocess("fixture-model", job, result, lambda *_args: None)
         ai_output = next(item for item in processed["downloaded_files"] if item["type"] == "ai-output")
         assert_equal(Path(ai_output["path"]).read_text(encoding="utf-8"), "media.mp4", "AI output")
+
+        slow_model_dir = root / "models" / "slow"
+        slow_model_dir.mkdir()
+        slow_runner = slow_model_dir / "runner.py"
+        slow_runner.write_text(
+            "import os, pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[1], 'runner.pid').write_text(str(os.getpid()), encoding='utf-8')\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        slow_manifest = {
+            "id": "slow-model",
+            "name": "Slow model",
+            "provider": "test",
+            "command": [sys.executable, str(slow_runner), "{output_dir}"],
+            "timeout_seconds": 30,
+        }
+        (slow_model_dir / "douyingo-model.json").write_text(
+            json.dumps(slow_manifest),
+            encoding="utf-8",
+        )
+        cancel_calls = 0
+
+        def cancel_runner(*_args):
+            nonlocal cancel_calls
+            cancel_calls += 1
+            if cancel_calls > 1:
+                raise RuntimeError("cancel AI runner")
+
+        slow_result = {
+            "success": True,
+            "downloaded_files": [{"type": "video", "path": str(media)}],
+        }
+        with patch.dict(os.environ, {"DOUYINGO_MODELS_DIR": str(root / "models")}):
+            try:
+                run_ai_postprocess("slow-model", job, slow_result, cancel_runner)
+                raise AssertionError("AI cancellation did not interrupt the runner")
+            except RuntimeError as exc:
+                assert_equal(str(exc), "cancel AI runner", "AI cancellation error")
+
+        pid_path = output_dir / "runner.pid"
+        assert_equal(pid_path.is_file(), True, "AI runner PID fixture")
+        runner_pid = int(pid_path.read_text(encoding="utf-8"))
+        assert_equal(process_is_running(runner_pid), False, "AI runner process cleanup")
+
+        pid_path.unlink()
+        slow_manifest["id"] = "timeout-model"
+        slow_manifest["name"] = "Timeout model"
+        slow_manifest["timeout_seconds"] = 1
+        (slow_model_dir / "douyingo-model.json").write_text(
+            json.dumps(slow_manifest),
+            encoding="utf-8",
+        )
+        with patch.dict(os.environ, {"DOUYINGO_MODELS_DIR": str(root / "models")}):
+            try:
+                run_ai_postprocess(
+                    "timeout-model",
+                    job,
+                    {
+                        "success": True,
+                        "downloaded_files": [{"type": "video", "path": str(media)}],
+                    },
+                    lambda *_args: None,
+                )
+                raise AssertionError("AI timeout did not interrupt the runner")
+            except RuntimeError as exc:
+                assert_equal(
+                    str(exc),
+                    "AI model runner timed out after 1 seconds",
+                    "AI timeout error",
+                )
+        timeout_pid = int(pid_path.read_text(encoding="utf-8"))
+        assert_equal(process_is_running(timeout_pid), False, "AI timeout process cleanup")
 
 
 def test_job_history_persistence_and_recovery():
@@ -469,6 +563,60 @@ def test_network_options_are_transient():
         service.shutdown(wait=True)
 
 
+def test_active_download_cancellation_is_terminal():
+    class CancellableDownloader:
+        def __init__(self):
+            self.started = threading.Event()
+
+        def get_video_info(self, _url):
+            return {"title": "Cancellation fixture"}
+
+        def download_video(self, *_args, progress_callback=None, **_kwargs):
+            self.started.set()
+            while True:
+                try:
+                    progress_callback(10, "Fixture download")
+                except RuntimeError as exc:
+                    return {
+                        "success": False,
+                        "error": str(exc),
+                        "downloaded_files": [],
+                    }
+                time.sleep(0.05)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        downloader = CancellableDownloader()
+        service = DownloadService(
+            root,
+            max_workers=1,
+            job_store=JobStore(root / "jobs.sqlite3"),
+        )
+        request = DownloadRequest(
+            text="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            platform=Platform.YOUTUBE,
+            options=DownloadOptions(output_dir=str(root / "downloads")),
+        )
+        with patch.object(service, "_create_downloader", return_value=downloader):
+            job = service.create_download(request)
+            assert_equal(downloader.started.wait(timeout=3), True, "download fixture started")
+            service.cancel_job(job.id)
+
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                cancelled = service.get_job(job.id)
+                if cancelled and cancelled.status == JobStatus.CANCELLED:
+                    break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("Active download did not become cancelled")
+
+        cancelled = service.get_job(job.id)
+        assert_equal(cancelled.status, JobStatus.CANCELLED, "active cancellation status")
+        assert_equal(cancelled.error, None, "active cancellation error")
+        service.shutdown(wait=True)
+
+
 def _test_job(output_dir: Path, options: DownloadOptions) -> DownloadJob:
     now = datetime.now(timezone.utc)
     return DownloadJob(
@@ -500,6 +648,7 @@ def main():
     test_job_history_persistence_and_recovery()
     test_job_history_deletion_contract()
     test_network_options_are_transient()
+    test_active_download_cancellation_is_terminal()
     print("Sidecar API smoke tests passed.")
 
 

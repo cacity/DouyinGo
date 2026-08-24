@@ -1,6 +1,8 @@
 # DouyinGo React/Tauri + Python Sidecar Migration
 
-This branch keeps the legacy PyQt entry point in place and adds the new desktop architecture beside it.
+The React/Tauri application is the primary desktop product on this branch. The
+legacy PyQt entry point remains only as migration-reference code and uses the
+optional `requirements-legacy.txt` dependency set.
 
 ## Target Architecture
 
@@ -19,6 +21,8 @@ React/Vite UI
 - `backend/`: Python FastAPI sidecar that wraps existing downloaders and exposes stable HTTP APIs.
 - `core/`: existing platform downloader code, preserved as the media implementation layer.
 - `scripts/build_sidecar.py`: PyInstaller build that creates the Tauri sidecar binary with the required target triple suffix.
+- `scripts/verify_media_contract.py`: deterministic source/packaged HLS, FFmpeg,
+  cancellation, and AI-runner contract verification.
 
 ## API Surface
 
@@ -48,7 +52,9 @@ running. They are never copied into task records, metadata JSON, or
 `jobs.sqlite3`.
 
 CORS is restricted to Tauri origins and loopback Vite development origins. The
-sidecar does not accept browser requests from arbitrary web origins.
+sidecar does not accept browser requests from arbitrary web origins. The Tauri
+WebView also uses an explicit production CSP that permits only application assets,
+IPC, and loopback sidecar connections.
 
 ## Media Contract
 
@@ -62,7 +68,9 @@ sidecar does not accept browser requests from arbitrary web origins.
   selected options, downloaded files, and sanitized platform metadata.
 
 Unsupported type/format pairs and unavailable AI runners are rejected before a
-job is queued. Successful jobs only report final files that exist on disk.
+job is queued. Successful jobs only report final files that exist on disk. Active
+cancel requests remain `cancelled` rather than being rewritten as download errors;
+FFmpeg processes are stopped and partial outputs are removed.
 
 ## AI Model Runners
 
@@ -87,6 +95,9 @@ command placeholders are `{input}`, `{output_dir}`, `{metadata}`, and
 reported path must exist inside the task output directory. Commands are launched
 directly without a shell.
 
+Runner execution is polled while active. Cancellation and timeout terminate the
+runner process tree, including child processes created by a runner.
+
 The AI panel's folder button creates and reveals the configured model directory.
 This gives model artifacts and `douyingo-model.json` manifests a stable install
 location without exposing arbitrary filesystem creation through the API.
@@ -98,6 +109,9 @@ Install Python dependencies:
 ```powershell
 python -m pip install -r requirements.txt
 ```
+
+The default requirements contain only sidecar/runtime/build dependencies. Install
+`requirements-legacy.txt` only when intentionally running the old PyQt reference UI.
 
 Install frontend dependencies:
 
@@ -117,9 +131,10 @@ Run the React UI only:
 npm.cmd run dev
 ```
 
-Run Tauri in development:
+Build the sidecar once, then run Tauri in development:
 
 ```powershell
+npm.cmd run package:sidecar
 npm.cmd run tauri:dev
 ```
 
@@ -127,7 +142,11 @@ During early development, if the PyInstaller sidecar has not been built yet, the
 
 The packaged desktop app prefers port `8765`. If another local service already owns that port, Tauri selects an available loopback port, starts the sidecar there, and returns the actual URL to React.
 
-Tauri also passes its process ID to the packaged sidecar. A watchdog exits the Python service when the owning desktop process disappears, including crash and forced-close cases where PyInstaller's child process would otherwise be orphaned.
+Tauri also passes its process ID to the packaged sidecar. A watchdog exits the
+Python service when the owning desktop process disappears, including crash and
+forced-close cases where PyInstaller's child process would otherwise be orphaned.
+Explicit close, retry, and startup-timeout paths terminate the full Windows
+PyInstaller process tree.
 
 ## Packaging
 
@@ -137,7 +156,7 @@ Build the Python sidecar for the current Rust target:
 npm.cmd run package:sidecar
 ```
 
-This runs PyInstaller, embeds `ffmpeg.exe`/`ffprobe.exe` when present, bundles the
+This runs PyInstaller, requires and embeds `ffmpeg.exe`/`ffprobe.exe`, bundles the
 official Deno runtime plus the matching `yt-dlp-ejs` challenge solver, and copies
 the output to:
 
@@ -149,11 +168,14 @@ The build guard requires `yt-dlp 2026.08.19` or newer. This avoids packaging the
 known-broken July 2026 YouTube client behavior that can return HTTP 403 for media
 URLs even when metadata extraction succeeds.
 
-Then build the desktop app:
+Build the complete desktop app:
 
 ```powershell
 npm.cmd run tauri:build
 ```
+
+`tauri:build` always runs `package:sidecar` first, so a backend change cannot be
+silently shipped with a stale sidecar executable.
 
 Tauri requires `externalBin` sidecars to use a target-triple suffix. The target triple can be inspected with:
 
@@ -189,7 +211,7 @@ Before merging this branch back to `main`, verify:
 2. Sidecar health, tool inventory (including Deno and `yt-dlp-ejs`), and invalid-request API tests pass.
 3. SQLite history survives a service restart, interrupted tasks recover as cancelled, and terminal history can be deleted without deleting output files.
 4. React build passes after `npm.cmd install`.
-5. `npm.cmd run package:sidecar` produces the suffixed binary under `src-tauri/binaries/`.
+5. `npm.cmd run tauri:build` rebuilds the suffixed sidecar and produces the NSIS installer.
 6. `npm.cmd run tauri:dev` starts the UI and can connect to the sidecar.
 7. At least one real download per platform is manually tested with legal test URLs.
 8. FFmpeg-dependent Koushare and thumbnail flows work from both source and packaged sidecar.
@@ -202,7 +224,8 @@ npm.cmd run verify:media
 ```
 
 This generates a local HLS fixture and drives both the source and packaged
-sidecars through video/MKV, audio/MP3, cover/JPG, metadata, and ffprobe checks.
+sidecars through video/MKV, audio/MP3, cover/JPG, metadata, ffprobe, active HLS
+cancellation, AI manifest execution, and AI runner process-tree cancellation.
 
 ## Known Follow-Ups
 

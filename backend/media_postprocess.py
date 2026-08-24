@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -83,7 +84,12 @@ def transform_downloaded_media(
             ]
             file_type = "image"
 
-        _run_ffmpeg(command)
+        try:
+            _run_ffmpeg(command, progress_callback)
+        except BaseException:
+            if output.resolve() != source.resolve():
+                output.unlink(missing_ok=True)
+            raise
         converted.append(_file_record(output, file_type, output_format))
 
     _remove_sources(source_files, keep={Path(item["path"]).resolve() for item in converted})
@@ -116,20 +122,51 @@ def append_metadata_file(result: dict[str, Any], job: DownloadJob) -> dict[str, 
     return result
 
 
-def _run_ffmpeg(command: list[str]) -> None:
-    completed = subprocess.run(
+def _run_ffmpeg(
+    command: list[str],
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> None:
+    process = subprocess.Popen(
         command,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=3600,
-        check=False,
     )
-    if completed.returncode != 0:
-        detail = "\n".join((completed.stderr or "").splitlines()[-8:])
-        raise RuntimeError(f"FFmpeg post-processing failed: {detail or completed.returncode}")
+    deadline = time.monotonic() + 3600
+    next_heartbeat = time.monotonic() + 1
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("FFmpeg post-processing timed out")
+            try:
+                _, stderr = process.communicate(timeout=min(1.0, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                if progress_callback and time.monotonic() >= next_heartbeat:
+                    progress_callback(92, "Post-processing media")
+                    next_heartbeat = time.monotonic() + 1
+        if process.returncode != 0:
+            detail = "\n".join((stderr or "").splitlines()[-8:])
+            raise RuntimeError(
+                f"FFmpeg post-processing failed: {detail or process.returncode}"
+            )
+    except BaseException:
+        _stop_process(process)
+        raise
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
 
 
 def _remove_sources(files: list[dict[str, Any]], keep: set[Path]) -> None:

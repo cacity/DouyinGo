@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -138,18 +140,13 @@ def run_ai_postprocess(
     }
 
     progress_callback(97, f"Running AI model: {runner.info.name}")
-    completed = subprocess.run(
+    completed = _run_runner_command(
         command,
-        cwd=runner.manifest_path.parent,
-        input=json.dumps(payload, ensure_ascii=False),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=runner.timeout_seconds,
-        check=False,
-        shell=False,
+        runner.manifest_path.parent,
+        json.dumps(payload, ensure_ascii=False),
+        runner.timeout_seconds,
+        progress_callback,
+        runner.info.name,
     )
     if completed.returncode != 0:
         detail = "\n".join((completed.stderr or "").splitlines()[-8:])
@@ -169,6 +166,97 @@ def run_ai_postprocess(
         ]
     result.setdefault("downloaded_files", []).extend(reported)
     return result
+
+
+def _run_runner_command(
+    command: list[str],
+    cwd: Path,
+    payload: str,
+    timeout_seconds: int,
+    progress_callback: Callable[[int, str], None],
+    runner_name: str,
+) -> subprocess.CompletedProcess[str]:
+    group_options: dict[str, Any] = {}
+    if os.name == "nt":
+        group_options["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        )
+    else:
+        group_options["start_new_session"] = True
+
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+        **group_options,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    first_communication = True
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"AI model runner timed out after {timeout_seconds} seconds"
+                )
+            try:
+                if first_communication:
+                    stdout, stderr = process.communicate(
+                        input=payload,
+                        timeout=min(1.0, remaining),
+                    )
+                    first_communication = False
+                else:
+                    stdout, stderr = process.communicate(timeout=min(1.0, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                first_communication = False
+                progress_callback(97, f"Running AI model: {runner_name}")
+        return subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except BaseException:
+        _stop_process_tree(process)
+        raise
+
+
+def _stop_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=5)
 
 
 def _load_manifest(path: Path) -> ModelRunner:

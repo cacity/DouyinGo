@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 1420",
     "tauri:dev": "tauri dev",
     "build": "tsc && vite build",
-    "tauri:build": "tauri build",
+    "tauri:build": "npm run package:sidecar && tauri build",
     "backend": "python -m backend.sidecar serve",
     "package:sidecar": "python scripts/build_sidecar.py",
     "verify:media": "python scripts/verify_media_contract.py --mode both"

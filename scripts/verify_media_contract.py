@@ -15,7 +15,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,7 @@ from backend.ffmpeg_tools import find_ffmpeg, find_ffprobe  # noqa: E402
 
 
 TEST_URL = "https://www.koushare.com/video/details/203628"
+TEST_CANCEL_URL = "https://www.koushare.com/video/details/203629"
 CONTRACTS = (
     ("video", "MKV", "video", ".mkv", {"video", "audio"}),
     ("audio", "MP3", "audio", ".mp3", {"audio"}),
@@ -41,11 +42,14 @@ class KoushareFixtureHandler(BaseHTTPRequestHandler):
     server: FixtureServer
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         if path == "/video/v1/video/info":
             self._send_json({"success": True, "data": {"title": "Koushare HLS fixture"}})
             return
         if path == "/video/v1/video/getVideoPlayAddress":
+            hls_dir = "slow-hls" if query.get("videoId") == ["203629"] else "hls"
             self._send_json(
                 {
                     "success": True,
@@ -55,7 +59,7 @@ class KoushareFixtureHandler(BaseHTTPRequestHandler):
                                 {
                                     "labelEn": "FHD",
                                     "height": 180,
-                                    "fileUrl": f"{self.server.base_url}/hls/media.m3u8",
+                                    "fileUrl": f"{self.server.base_url}/{hls_dir}/media.m3u8",
                                 }
                             ]
                         }
@@ -63,8 +67,11 @@ class KoushareFixtureHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if path.startswith("/hls/"):
-            self._send_file(self.server.fixture_dir / Path(path).name)
+        if path.startswith(("/hls/", "/slow-hls/")):
+            self._send_file(
+                self.server.fixture_dir / Path(path).name,
+                slow=path.startswith("/slow-hls/") and path.endswith(".ts"),
+            )
             return
         self.send_error(404)
 
@@ -89,7 +96,7 @@ class KoushareFixtureHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_file(self, path: Path) -> None:
+    def _send_file(self, path: Path, slow: bool = False) -> None:
         if not path.is_file():
             self.send_error(404)
             return
@@ -101,7 +108,16 @@ class KoushareFixtureHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            if slow:
+                for offset in range(0, len(body), 16 * 1024):
+                    self.wfile.write(body[offset : offset + 16 * 1024])
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            else:
+                self.wfile.write(body)
+        except OSError:
+            pass
 
 
 def main() -> int:
@@ -203,6 +219,57 @@ def _generate_hls(ffmpeg: str, fixture_dir: Path) -> None:
         raise RuntimeError("FFmpeg did not produce the local HLS playlist")
 
 
+def _prepare_ai_fixtures(models_dir: Path) -> None:
+    fixture_dir = models_dir / "contract"
+    fixture_dir.mkdir(parents=True)
+    runner = fixture_dir / "runner.py"
+    runner.write_text(
+        "import json, pathlib, sys\n"
+        "payload = json.load(sys.stdin)\n"
+        "output = pathlib.Path(sys.argv[1]) / 'ai-contract.txt'\n"
+        "output.write_text(payload['job']['platform'], encoding='utf-8')\n"
+        "print(json.dumps({'downloaded_files': "
+        "[{'type': 'ai-output', 'path': output.name}]}))\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "id": "contract-model",
+        "name": "Contract model",
+        "provider": "test",
+        "capabilities": ["postprocess"],
+        "command": [sys.executable, str(runner), "{output_dir}"],
+        "timeout_seconds": 30,
+    }
+    (fixture_dir / "douyingo-model.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
+    slow_dir = models_dir / "slow"
+    slow_dir.mkdir()
+    slow_runner = slow_dir / "runner.py"
+    slow_runner.write_text(
+        "import json, os, pathlib, sys, time\n"
+        "json.load(sys.stdin)\n"
+        "pathlib.Path(sys.argv[1], 'runner.pid').write_text("
+        "str(os.getpid()), encoding='utf-8')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    slow_manifest = {
+        "id": "slow-contract-model",
+        "name": "Slow contract model",
+        "provider": "test",
+        "capabilities": ["postprocess"],
+        "command": [sys.executable, str(slow_runner), "{output_dir}"],
+        "timeout_seconds": 30,
+    }
+    (slow_dir / "douyingo-model.json").write_text(
+        json.dumps(slow_manifest),
+        encoding="utf-8",
+    )
+
+
 def _verify_sidecar(
     label: str,
     command_prefix: list[str],
@@ -213,8 +280,10 @@ def _verify_sidecar(
 ) -> None:
     data_dir = root / "data"
     downloads_dir = root / "downloads"
+    models_dir = root / "models"
     data_dir.mkdir(parents=True)
     downloads_dir.mkdir(parents=True)
+    _prepare_ai_fixtures(models_dir)
     port = _free_port()
     log_path = root / "sidecar.log"
     env = os.environ.copy()
@@ -223,6 +292,7 @@ def _verify_sidecar(
             "DOUYINGO_DATA_DIR": str(data_dir),
             "DOUYINGO_DOWNLOADS_DIR": str(downloads_dir),
             "DOUYINGO_KOUSHARE_API_BASE": api_base,
+            "DOUYINGO_MODELS_DIR": str(models_dir),
         }
     )
     command = [
@@ -301,6 +371,16 @@ def _verify_sidecar(
                     f"{label}: {download_type}/{output_format} -> "
                     f"{media_path.name} ({media_path.stat().st_size} bytes, {sorted(streams)})"
                 )
+
+            _verify_cancellation(label, base_url, downloads_dir / "cancel", process, log_path)
+            _verify_ai_runner(label, base_url, downloads_dir / "ai", process, log_path)
+            _verify_ai_cancellation(
+                label,
+                base_url,
+                downloads_dir / "ai-cancel",
+                process,
+                log_path,
+            )
         except Exception:
             log_file.flush()
             print(log_path.read_text(encoding="utf-8", errors="replace"), file=sys.stderr)
@@ -345,6 +425,136 @@ def _wait_for_job(
             return job
         time.sleep(0.2)
     raise TimeoutError(f"Timed out waiting for download job {job_id}")
+
+
+def _verify_cancellation(
+    label: str,
+    base_url: str,
+    output_dir: Path,
+    process: subprocess.Popen[str],
+    log_path: Path,
+) -> None:
+    payload = {
+        "text": TEST_CANCEL_URL,
+        "platform": "koushare",
+        "options": {
+            "quality": "best",
+            "format": "MP4",
+            "download_type": "video",
+            "save_metadata": False,
+            "output_dir": str(output_dir),
+        },
+    }
+    job = _request_json(f"{base_url}/api/downloads", "POST", payload)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"Sidecar exited with {process.returncode}: "
+                f"{log_path.read_text(encoding='utf-8', errors='replace')}"
+            )
+        job = _request_json(f"{base_url}/api/downloads/{job['id']}")
+        if job["status"] == "downloading" and job["progress"] >= 28:
+            break
+        if job["status"] in {"success", "error", "cancelled"}:
+            raise AssertionError(f"{label} cancellation fixture ended too early: {job}")
+        time.sleep(0.1)
+    else:
+        raise TimeoutError(f"Timed out waiting for {label} cancellation fixture")
+
+    _request_json(f"{base_url}/api/downloads/{job['id']}/cancel", "POST")
+    job = _wait_for_job(base_url, job["id"], process, log_path)
+    if job["status"] != "cancelled" or job.get("error") is not None:
+        raise AssertionError(f"{label} active cancellation failed: {job}")
+    if list(output_dir.glob("*.mp4")):
+        raise AssertionError(f"{label} cancellation left a partial MP4 in {output_dir}")
+    print(f"{label}: active HLS cancellation -> cancelled (partial output removed)")
+
+
+def _verify_ai_runner(
+    label: str,
+    base_url: str,
+    output_dir: Path,
+    process: subprocess.Popen[str],
+    log_path: Path,
+) -> None:
+    payload = {
+        "text": TEST_URL,
+        "platform": "koushare",
+        "options": {
+            "quality": "best",
+            "format": "JPG",
+            "download_type": "cover",
+            "save_metadata": False,
+            "ai_model_id": "contract-model",
+            "output_dir": str(output_dir),
+        },
+    }
+    job = _request_json(f"{base_url}/api/downloads", "POST", payload)
+    job = _wait_for_job(base_url, job["id"], process, log_path)
+    if job["status"] != "success":
+        raise AssertionError(f"{label} AI runner failed: {job}")
+    ai_output = next(
+        (item for item in job["downloaded_files"] if item["type"] == "ai-output"),
+        None,
+    )
+    if ai_output is None or not Path(ai_output["path"]).is_file():
+        raise AssertionError(f"{label} AI output contract failed: {job}")
+    content = Path(ai_output["path"]).read_text(encoding="utf-8")
+    if content != "koushare":
+        raise AssertionError(f"{label} AI runner received unexpected job data: {content}")
+    print(f"{label}: AI manifest runner -> {Path(ai_output['path']).name}")
+
+
+def _verify_ai_cancellation(
+    label: str,
+    base_url: str,
+    output_dir: Path,
+    process: subprocess.Popen[str],
+    log_path: Path,
+) -> None:
+    payload = {
+        "text": TEST_URL,
+        "platform": "koushare",
+        "options": {
+            "quality": "best",
+            "format": "JPG",
+            "download_type": "cover",
+            "save_metadata": False,
+            "ai_model_id": "slow-contract-model",
+            "output_dir": str(output_dir),
+        },
+    }
+    job = _request_json(f"{base_url}/api/downloads", "POST", payload)
+    pid_path = output_dir / "runner.pid"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"Sidecar exited with {process.returncode}: "
+                f"{log_path.read_text(encoding='utf-8', errors='replace')}"
+            )
+        job = _request_json(f"{base_url}/api/downloads/{job['id']}")
+        if pid_path.is_file():
+            break
+        if job["status"] in {"success", "error", "cancelled"}:
+            raise AssertionError(f"{label} AI cancellation fixture ended too early: {job}")
+        time.sleep(0.1)
+    else:
+        raise TimeoutError(f"Timed out waiting for {label} AI runner")
+
+    runner_pid = int(pid_path.read_text(encoding="utf-8"))
+    _request_json(f"{base_url}/api/downloads/{job['id']}/cancel", "POST")
+    job = _wait_for_job(base_url, job["id"], process, log_path)
+    if job["status"] != "cancelled" or job.get("error") is not None:
+        raise AssertionError(f"{label} AI cancellation failed: {job}")
+
+    deadline = time.monotonic() + 10
+    while _process_is_running(runner_pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if _process_is_running(runner_pid):
+        raise AssertionError(f"{label} AI runner process {runner_pid} was not stopped")
+    print(f"{label}: active AI cancellation -> cancelled (runner stopped)")
 
 
 def _request_json(
@@ -467,6 +677,41 @@ def _windows_listener_pid(port: int) -> int | None:
         ):
             return int(fields[4])
     return None
+
+
+def _process_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            return bool(
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                and exit_code.value == 259
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _packaged_sidecar() -> Path:
